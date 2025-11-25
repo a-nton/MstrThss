@@ -3,5 +3,6 @@ requests
 yfinance
 openai
 numpy
+scipy
 bokeh
 python-dotenv

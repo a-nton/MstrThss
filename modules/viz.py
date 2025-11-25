@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import os
+from scipy import stats
 from bokeh.plotting import figure, save, output_file
 from bokeh.models import ColumnDataSource, HoverTool, Div, TabPanel, Tabs
 from bokeh.layouts import column
@@ -20,6 +21,90 @@ def format_headlines_for_tooltip(headlines_str, max_lines=10):
     # Format as HTML list
     formatted = "<br>".join(f"• {h[:80]}{'...' if len(h) > 80 else ''}" for h in headlines)
     return formatted
+
+def calculate_accuracy_metrics(df_h, prob_col):
+    """
+    Calculate accuracy metrics at various confidence thresholds.
+    Returns a formatted HTML string with accuracy statistics.
+    """
+    thresholds = [
+        (0.0, 1.01, "All (0-100%)"),
+        (0.0, 0.2, "80%+ Down (0-20%)"),
+        (0.0, 0.3, "70%+ Down (0-30%)"),
+        (0.0, 0.4, "60%+ Down (0-40%)"),
+        (0.6, 1.01, "60%+ Up (60-100%)"),
+        (0.7, 1.01, "70%+ Up (70-100%)"),
+        (0.8, 1.01, "80%+ Up (80-100%)")
+    ]
+
+    metrics = []
+
+    # Overall accuracy
+    total = len(df_h)
+    correct = (df_h["status"] == "Correct").sum()
+    overall_acc = (correct / total * 100) if total > 0 else 0
+
+    # Directional accuracy by threshold
+    for low, high, label in thresholds:
+        mask = (df_h[prob_col] >= low) & (df_h[prob_col] < high)
+        subset = df_h[mask]
+        n = len(subset)
+
+        if n > 0:
+            n_correct = (subset["status"] == "Correct").sum()
+            acc = (n_correct / n * 100)
+
+            # Magnitude accuracy (MAE)
+            mae = np.abs(subset["pred_return_pct"] - subset["actual_return_pct"]).mean()
+
+            metrics.append({
+                "label": label,
+                "n": n,
+                "dir_acc": acc,
+                "mae": mae
+            })
+
+    # Perform t-test against 50% (random chance)
+    # Binary outcomes: 1 = correct, 0 = wrong
+    outcomes = (df_h["status"] == "Correct").astype(int)
+
+    # One-sample t-test: H0: mean = 0.5 (50% accuracy)
+    if len(outcomes) > 1:
+        t_stat, p_value = stats.ttest_1samp(outcomes, 0.5)
+
+        # Determine significance level
+        if p_value < 0.001:
+            sig_label = "***"
+            sig_color = "#2ca02c"
+        elif p_value < 0.01:
+            sig_label = "**"
+            sig_color = "#8fbc8f"
+        elif p_value < 0.05:
+            sig_label = "*"
+            sig_color = "#ffa500"
+        else:
+            sig_label = "ns"
+            sig_color = "#888"
+
+        t_test_info = f"<div style='font-size: 10px; color: {sig_color}; margin-top: 5px;'>t-test vs 50%: t={t_stat:.2f}, p={p_value:.4f} {sig_label}</div>"
+    else:
+        t_test_info = ""
+
+    # Build HTML
+    html = f"""
+    <div style="background: #f9f9f9; padding: 10px; border-radius: 5px; margin-bottom: 10px;">
+        <div style="font-weight: bold; margin-bottom: 5px;">Overall Accuracy: {overall_acc:.1f}% ({correct}/{total}){t_test_info}</div>
+    """
+
+    if metrics:
+        html += "<table style='width: 100%; font-size: 11px; border-collapse: collapse;'>"
+        html += "<tr style='border-bottom: 1px solid #ddd;'><th>Confidence</th><th>N</th><th>Dir Acc</th><th>MAE</th></tr>"
+        for m in metrics:
+            html += f"<tr><td>{m['label']}</td><td>{m['n']}</td><td>{m['dir_acc']:.1f}%</td><td>{m['mae']:.2f}%</td></tr>"
+        html += "</table>"
+
+    html += "</div>"
+    return html
 
 def generate_bokeh_dashboard(df, output_folder):
     """
@@ -70,6 +155,10 @@ def generate_bokeh_dashboard(df, output_folder):
                 df_h["justification_display"] = ""
 
             df_h = df_h.sort_values("date")
+
+            # Calculate accuracy metrics
+            metrics_html = calculate_accuracy_metrics(df_h, prob_col)
+            metrics_div = Div(text=metrics_html, width=1000)
 
             p = figure(
                 title=f"{ticker} - Horizon: {h_name.upper()}",
@@ -132,6 +221,8 @@ def generate_bokeh_dashboard(df, output_folder):
             p.legend.click_policy = "hide"
             p.legend.location = "top_left"
 
+            # Add metrics div then plot
+            horizon_plots.append(metrics_div)
             horizon_plots.append(p)
 
         if horizon_plots:

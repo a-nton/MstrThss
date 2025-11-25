@@ -7,21 +7,19 @@ from modules.viz import generate_bokeh_dashboard
 
 def get_latest_run_dir(base_dir):
     """
-    Finds the most recent run directory for today.
+    Finds the most recent run directory across all dates.
     Returns path like: results/2025-11-23/run_003/
     """
-    from datetime import datetime
-    date_str = datetime.now().strftime("%Y-%m-%d")
-    date_path = os.path.join(base_dir, date_str)
+    # Find all date directories
+    date_dirs = sorted(glob.glob(os.path.join(base_dir, "20*")), reverse=True)
 
-    if not os.path.exists(date_path):
-        return None
+    for date_dir in date_dirs:
+        # Find runs in this date
+        runs = sorted(glob.glob(os.path.join(date_dir, "run_*")), reverse=True)
+        if runs:
+            return runs[0]  # Most recent run in most recent date
 
-    runs = sorted(glob.glob(os.path.join(date_path, "run_*")))
-    if not runs:
-        return None
-
-    return runs[-1]  # Most recent run
+    return None
 
 def main():
     print("=== STEP 3: VISUALIZATION ONLY ===")
@@ -30,8 +28,8 @@ def main():
     run_dir = get_latest_run_dir(RESULTS_DIR)
 
     if not run_dir:
-        print("No existing run directories found for today.")
-        print("Please run the LLM step first (option 2).")
+        print("❌ No existing run directories found.")
+        print("   Please run the LLM step first (option 2).")
         return
 
     csv_path = os.path.join(run_dir, "run_results.csv")
