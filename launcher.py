@@ -32,6 +32,24 @@ class TeeOutput:
     def close(self):
         self.log.close()
 
+def run_command_realtime(command):
+    """Runs a command and streams output to sys.stdout (TeeOutput) in real-time"""
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT, # Merge stderr into stdout
+        text=True,
+        bufsize=1, # Line buffering
+        universal_newlines=True
+    )
+    
+    # Read output line by line as it is generated
+    for line in process.stdout:
+        print(line, end='')
+        sys.stdout.flush() # Ensure it hits the terminal/log immediately
+        
+    return process.wait() == 0
+
 def get_log_path():
     """Get path for the current run's log file"""
     from utils import create_new_run_dir
@@ -46,16 +64,10 @@ def run_step1(data_source_module, run_dir):
     print("Running Step 1: Data Ingestion...")
     print("="*50)
     sys.stdout.flush()
-    result = subprocess.run(
-        [sys.executable, "step1_ingest_data.py", "--data-source", data_source_module, "--run-dir", run_dir],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True
-    )
-    # Print and return output
-    print(result.stdout, end='')
-    sys.stdout.flush()
-    return result.returncode == 0
+    
+    # Added "-u" for unbuffered output
+    cmd = [sys.executable, "-u", "step1_ingest_data.py", "--data-source", data_source_module, "--run-dir", run_dir]
+    return run_command_realtime(cmd)
 
 def run_step2(llm_config_module, run_dir):
     """Run LLM processing with selected LLM config plugin"""
@@ -63,16 +75,10 @@ def run_step2(llm_config_module, run_dir):
     print("Running Step 2: LLM Processing...")
     print("="*50)
     sys.stdout.flush()
-    result = subprocess.run(
-        [sys.executable, "step2_run_model.py", "--llm-config", llm_config_module, "--run-dir", run_dir],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True
-    )
-    # Print and return output
-    print(result.stdout, end='')
-    sys.stdout.flush()
-    return result.returncode == 0
+    
+    # Added "-u" for unbuffered output
+    cmd = [sys.executable, "-u", "step2_run_model.py", "--llm-config", llm_config_module, "--run-dir", run_dir]
+    return run_command_realtime(cmd)
 
 def run_step3():
     """Run visualization (no plugin needed)"""
@@ -80,16 +86,10 @@ def run_step3():
     print("Running Step 3: Visualization...")
     print("="*50)
     sys.stdout.flush()
-    result = subprocess.run(
-        [sys.executable, "step3_visualize.py"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True
-    )
-    # Print and return output
-    print(result.stdout, end='')
-    sys.stdout.flush()
-    return result.returncode == 0
+    
+    # Added "-u" for unbuffered output
+    cmd = [sys.executable, "-u", "step3_visualize.py"]
+    return run_command_realtime(cmd)
 
 def main():
     print("="*50)

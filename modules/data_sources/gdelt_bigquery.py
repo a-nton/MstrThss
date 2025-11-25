@@ -87,6 +87,9 @@ def fetch_news(ticker, company_name, start_date=None, end_date=None, max_results
     # Build query
     # GDELT 2.0 GKG (Global Knowledge Graph) table
     # Contains article metadata including URLs and titles
+    # CRITICAL: Use _PARTITIONDATE to limit scan to specific days (Cost: ~15GB vs 1500GB)
+    partition_filter = f"_PARTITIONDATE BETWEEN '{start_date}' AND '{end_date}'"
+
     query = f"""
     SELECT
         DocumentIdentifier as url,
@@ -95,11 +98,12 @@ def fetch_news(ticker, company_name, start_date=None, end_date=None, max_results
         Persons,
         Organizations,
         Locations,
-        Tone
+        V2Tone as Tone
     FROM
         `gdelt-bq.gdeltv2.gkg_partitioned`
     WHERE
-        DATE(PARSE_TIMESTAMP('%Y%m%d%H%M%S', CAST(DATE AS STRING)))
+        {partition_filter}
+        AND DATE(PARSE_TIMESTAMP('%Y%m%d%H%M%S', CAST(DATE AS STRING)))
             BETWEEN '{start_date.strftime('%Y-%m-%d')}'
             AND '{end_date.strftime('%Y-%m-%d')}'
         AND (

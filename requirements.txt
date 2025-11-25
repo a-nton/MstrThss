@@ -9,3 +9,6 @@ python-dotenv
 feedparser
 beautifulsoup4
 google-cloud-bigquery
+db-dtypes
+pyarrow
+google-cloud-bigquery-storage
