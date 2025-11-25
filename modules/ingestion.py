@@ -3,16 +3,17 @@ import pandas as pd
 import yfinance as yf
 from datetime import date, timedelta
 from urllib.parse import urlencode
-from config import DOC_BASE_URL
+# Import centralized dates
+from config import DOC_BASE_URL, DATA_START_DATE, PRICE_COLLECTION_END_DATE 
 
 def load_price_data(ticker):
     """
     Fetches daily price data from YFinance.
-    Hardcoded range matches your original test: Sept-Nov 2025
+    Date range uses centralized config settings.
     """
-    # Adjust these dates if you want to run for "today"
-    start = date(2025, 9, 1)
-    end = date(2025, 11, 1)
+    # Use centralized dates for price collection
+    start = DATA_START_DATE
+    end = PRICE_COLLECTION_END_DATE
 
     print(f"   Downloading prices for {ticker} ({start} to {end})...")
     

@@ -7,6 +7,7 @@ from bokeh.models import ColumnDataSource, HoverTool, Div, TabPanel, Tabs
 from bokeh.layouts import column
 from bokeh.palettes import Category10_10
 from config import HORIZONS
+from modules.volatility_calibration import get_calibration_metrics
 
 def format_headlines_for_tooltip(headlines_str, max_lines=10):
     """
@@ -65,28 +66,28 @@ def calculate_accuracy_metrics(df_h, prob_col):
             })
 
     # Perform t-test against 50% (random chance)
-    # Binary outcomes: 1 = correct, 0 = wrong
     outcomes = (df_h["status"] == "Correct").astype(int)
 
-    # One-sample t-test: H0: mean = 0.5 (50% accuracy)
     if len(outcomes) > 1:
-        t_stat, p_value = stats.ttest_1samp(outcomes, 0.5)
-
-        # Determine significance level
-        if p_value < 0.001:
-            sig_label = "***"
-            sig_color = "#2ca02c"
-        elif p_value < 0.01:
-            sig_label = "**"
-            sig_color = "#8fbc8f"
-        elif p_value < 0.05:
-            sig_label = "*"
-            sig_color = "#ffa500"
+        # Check for variance to avoid precision loss warnings
+        if outcomes.var() > 1e-10:  # Only do t-test if there's actual variance
+            t_stat, p_value = stats.ttest_1samp(outcomes, 0.5)
+            if p_value < 0.001:
+                sig_label = "***"
+                sig_color = "#2ca02c"
+            elif p_value < 0.01:
+                sig_label = "**"
+                sig_color = "#8fbc8f"
+            elif p_value < 0.05:
+                sig_label = "*"
+                sig_color = "#ffa500"
+            else:
+                sig_label = "ns"
+                sig_color = "#888"
+            t_test_info = f"<div style='font-size: 10px; color: {sig_color}; margin-top: 5px;'>t-test vs 50%: t={t_stat:.2f}, p={p_value:.4f} {sig_label}</div>"
         else:
-            sig_label = "ns"
-            sig_color = "#888"
-
-        t_test_info = f"<div style='font-size: 10px; color: {sig_color}; margin-top: 5px;'>t-test vs 50%: t={t_stat:.2f}, p={p_value:.4f} {sig_label}</div>"
+            # All outcomes are the same (no variance)
+            t_test_info = ""
     else:
         t_test_info = ""
 
@@ -109,6 +110,7 @@ def calculate_accuracy_metrics(df_h, prob_col):
 def generate_bokeh_dashboard(df, output_folder):
     """
     Generates a Bokeh dashboard with ticker dropdown and improved tooltips.
+    Supports "Council of Agents" dynamic tooltips.
     """
     # Ensure datetime
     if 'date' in df.columns:
@@ -123,6 +125,63 @@ def generate_bokeh_dashboard(df, output_folder):
 
     # Create tabs for each ticker
     ticker_tabs = []
+
+    # --- DYNAMIC TOOLTIP CONSTRUCTION ---
+    # Check if we have MAKER Agent data in columns
+    has_agents = "agent_fundamental" in df.columns
+
+    base_tooltip = """
+        <div style="width: 400px; padding: 10px;">
+            <div style="font-weight: bold; font-size: 14px; margin-bottom: 8px;">
+                @ticker - @date{%F}
+            </div>
+            <div style="margin-bottom: 5px;">
+                <b>Actual:</b> @act{0.00}% | <b>Predicted:</b> @pred{0.00}% | <b>Status:</b> @status
+            </div>
+            <div style="margin-bottom: 5px;">
+                <b>Prob Up:</b> @prob_up{0.0%}
+            </div>
+    """
+    
+    if has_agents:
+        # Check if we have 4-agent system (bull/bear) or legacy 3-agent
+        has_bull_bear = "agent_bull" in df.columns and "agent_bear" in df.columns
+
+        if has_bull_bear:
+            base_tooltip += """
+                <hr style="margin: 8px 0;">
+                <div style="background: #eef; padding: 5px; border-radius: 3px; font-size: 11px;">
+                    <b>🏛️ Council of Agents (Bull vs Bear):</b><br>
+                    <b>🐂 Bull Case:</b> @agent_bull<br>
+                    <b>🐻 Bear Case:</b> @agent_bear<br>
+                    <b>📈 Technician:</b> @agent_technical<br>
+                    <b>🧠 Psychologist:</b> @agent_sentiment
+                </div>
+            """
+        else:
+            base_tooltip += """
+                <hr style="margin: 8px 0;">
+                <div style="background: #eef; padding: 5px; border-radius: 3px; font-size: 11px;">
+                    <b>🏛️ Council of Agents:</b><br>
+                    <b>Fundamentalist:</b> @agent_fundamental<br>
+                    <b>Technician:</b> @agent_technical<br>
+                    <b>Psychologist:</b> @agent_risk
+                </div>
+            """
+    
+    base_tooltip += """
+            <hr style="margin: 8px 0;">
+            <div style="margin-bottom: 8px;">
+                <b>Headlines:</b>
+                <div style="font-size: 11px; color: #555;">@headlines{safe}</div>
+            </div>
+            <hr style="margin: 8px 0;">
+            <div>
+                <b>Analysis:</b>
+                <div style="font-size: 11px; color: #333; font-style: italic;">@justification</div>
+            </div>
+        </div>
+    """
 
     for ticker_idx, ticker in enumerate(tickers):
         ticker_color = colors[ticker_idx % 10]
@@ -145,7 +204,7 @@ def generate_bokeh_dashboard(df, output_folder):
             df_h["status"] = np.where((df_h["pred_return_pct"] > 0) == (df_h["actual_return_pct"] > 0), "Correct", "Wrong")
             df_h["color"] = np.where(df_h["status"] == "Correct", "#2ca02c", "#d62728")
 
-            # Format headlines for tooltip (multiple lines)
+            # Format headlines for tooltip
             df_h["headlines_formatted"] = df_h["headline_text"].apply(format_headlines_for_tooltip)
 
             # Get justification if available
@@ -158,6 +217,43 @@ def generate_bokeh_dashboard(df, output_folder):
 
             # Calculate accuracy metrics
             metrics_html = calculate_accuracy_metrics(df_h, prob_col)
+
+            # Add magnitude calibration metrics per ticker per horizon
+            cal_metrics = get_calibration_metrics(df_h)
+
+            # Determine calibration quality
+            ratio = cal_metrics['overestimation_ratio']
+            if ratio == 0.0 or cal_metrics['actual_mean'] == 0.0:
+                cal_status = "⚠️ Insufficient data"
+                cal_color = "#d1d1d1"
+            elif 0.8 <= ratio <= 1.2:
+                cal_status = "✅ Well-calibrated"
+                cal_color = "#d4edda"
+            elif 0.5 <= ratio < 0.8 or 1.2 < ratio <= 1.5:
+                cal_status = "⚠️ Moderate error"
+                cal_color = "#fff3cd"
+            else:
+                cal_status = "❌ Needs tuning"
+                cal_color = "#f8d7da"
+
+            cal_html = f"""
+            <div style="background: {cal_color}; padding: 10px; border-radius: 5px; margin-bottom: 10px; border-left: 4px solid #ffc107;">
+                <div style="font-weight: bold; margin-bottom: 5px;">
+                    📊 Magnitude Calibration ({ticker} - {h_name.upper()}) {cal_status}
+                </div>
+                <div style="font-size: 11px;">
+                    Avg Predicted Move: {cal_metrics['predicted_mean']:.2f}% |
+                    Avg Actual Move: {cal_metrics['actual_mean']:.2f}% |
+                    MAE: {cal_metrics['mae']:.2f}% |
+                    Ratio: {cal_metrics['overestimation_ratio']:.2f}x
+                </div>
+                <div style="font-size: 10px; color: #666; margin-top: 3px;">
+                    Target: Ratio between 0.8-1.2x (well-calibrated)
+                </div>
+            </div>
+            """
+            metrics_html = cal_html + metrics_html
+
             metrics_div = Div(text=metrics_html, width=1000)
 
             p = figure(
@@ -168,7 +264,8 @@ def generate_bokeh_dashboard(df, output_folder):
                 background_fill_color="#fafafa"
             )
 
-            source = ColumnDataSource(data=dict(
+            # Prepare data source
+            data_dict = dict(
                 date=df_h["date"].values,
                 act=df_h["actual_return_pct"].values,
                 pred=df_h["pred_return_pct"].values,
@@ -178,7 +275,25 @@ def generate_bokeh_dashboard(df, output_folder):
                 headlines=df_h["headlines_formatted"].values,
                 justification=df_h["justification_display"].values,
                 prob_up=df_h[prob_col].values
-            ))
+            )
+            
+            # Add Agent columns if they exist
+            if has_agents:
+                # Check for 4-agent system (bull/bear)
+                has_bull_bear = "agent_bull" in df_h.columns and "agent_bear" in df_h.columns
+
+                if has_bull_bear:
+                    data_dict["agent_bull"] = df_h["agent_bull"].fillna("-").values
+                    data_dict["agent_bear"] = df_h["agent_bear"].fillna("-").values
+                    data_dict["agent_technical"] = df_h["agent_technical"].fillna("-").values
+                    data_dict["agent_sentiment"] = df_h["agent_sentiment"].fillna("-").values
+                else:
+                    # Legacy 3-agent system
+                    data_dict["agent_fundamental"] = df_h["agent_fundamental"].fillna("-").values
+                    data_dict["agent_technical"] = df_h["agent_technical"].fillna("-").values
+                    data_dict["agent_risk"] = df_h["agent_risk"].fillna("-").values
+
+            source = ColumnDataSource(data=data_dict)
 
             # Actual returns line + circles
             p.line('date', 'act', source=source, color=ticker_color, line_width=2, alpha=0.8, legend_label="Actual")
@@ -188,31 +303,9 @@ def generate_bokeh_dashboard(df, output_folder):
             p.line('date', 'pred', source=source, color=ticker_color, line_dash="dashed", alpha=0.5, legend_label="Predicted")
             p.scatter('date', 'pred', source=source, marker="diamond", size=10, fill_color='color', line_color=ticker_color)
 
-            # Enhanced tooltip with formatted headlines and justification
+            # Tooltip
             hover = HoverTool(
-                tooltips="""
-                <div style="width: 400px; padding: 10px;">
-                    <div style="font-weight: bold; font-size: 14px; margin-bottom: 8px;">
-                        @ticker - @date{%F}
-                    </div>
-                    <div style="margin-bottom: 5px;">
-                        <b>Actual:</b> @act{0.00}% | <b>Predicted:</b> @pred{0.00}% | <b>Status:</b> @status
-                    </div>
-                    <div style="margin-bottom: 5px;">
-                        <b>Prob Up:</b> @prob_up{0.0%}
-                    </div>
-                    <hr style="margin: 8px 0;">
-                    <div style="margin-bottom: 8px;">
-                        <b>Headlines:</b>
-                        <div style="font-size: 11px; color: #555;">@headlines{safe}</div>
-                    </div>
-                    <hr style="margin: 8px 0;">
-                    <div>
-                        <b>LLM Justification:</b>
-                        <div style="font-size: 11px; color: #333; font-style: italic;">@justification</div>
-                    </div>
-                </div>
-                """,
+                tooltips=base_tooltip,
                 formatters={"@date": "datetime"},
                 mode='mouse'
             )

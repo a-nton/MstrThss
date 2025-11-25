@@ -97,13 +97,14 @@ def main():
     print("="*50)
     print("\nSelect pipeline mode:")
     print("1. FULL Pipeline (Ingest → LLM → Viz)")
-    print("2. LLM ONLY (Use existing data)")
+    print("2. LLM + Viz (Use existing data)")
     print("3. Viz ONLY (Use existing results)")
-    print("4. Exit")
+    print("4. Ingest ONLY (Download data)")
+    print("5. Exit")
 
-    choice = input("\nEnter choice (1-4): ").strip()
+    choice = input("\nEnter choice (1-5): ").strip()
 
-    # Setup logging for runs that need it (1 and 2)
+    # Setup logging for runs that need it (1, 2, and 4)
     tee = None
     log_path = None
 
@@ -152,7 +153,7 @@ def main():
             sys.stdout.flush()
 
         elif choice == "2":
-            # LLM only - need LLM config plugin
+            # LLM + Viz - need LLM config plugin
             print("\n--- Select LLM Configuration ---")
             llm_configs = discover_plugins("modules/llm_configs")
             llm_config_module = select_plugin(llm_configs, "LLM config")
@@ -171,7 +172,13 @@ def main():
             print(f"⏱️  Run started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             sys.stdout.flush()
 
-            run_step2(llm_config_module, run_dir)
+            # Run LLM processing
+            if not run_step2(llm_config_module, run_dir):
+                print("❌ Step 2 failed")
+                return
+
+            # Auto-proceed to visualization
+            run_step3()
 
             print(f"\n⏱️  Run completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             print(f"📁 Results and log saved to: {run_dir}")
@@ -182,6 +189,36 @@ def main():
             run_step3()
 
         elif choice == "4":
+            # Ingest only - need data source plugin
+            print("\n--- Select Data Source ---")
+            data_sources = discover_plugins("modules/data_sources")
+            data_source_module = select_plugin(data_sources, "data source")
+
+            if not data_source_module:
+                print("❌ Data source selection cancelled")
+                return
+
+            # Create log file
+            log_path, run_dir = get_log_path()
+            tee = TeeOutput(log_path)
+            original_stdout = sys.stdout
+            sys.stdout = tee
+
+            print(f"\n📝 Logging output to: {log_path}")
+            print(f"⏱️  Run started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            sys.stdout.flush()
+
+            # Run only data ingestion
+            if not run_step1(data_source_module, run_dir):
+                print("❌ Step 1 failed")
+                return
+
+            print(f"\n⏱️  Run completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f"📁 Data saved to: {run_dir}")
+            print("\n💡 Run option 2 from the menu to analyze with LLM.")
+            sys.stdout.flush()
+
+        elif choice == "5":
             print("Goodbye!")
             return
 

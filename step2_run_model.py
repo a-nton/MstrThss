@@ -69,7 +69,6 @@ def main(llm_config_module=None, run_dir=None):
         final_df.to_csv(csv_path, index=False)
         print(f"\n💾 Saved results to {csv_path}")
         print(f"📁 Results saved to: {run_dir}")
-        print("\n💡 Run option 3 from the menu to generate the dashboard.")
     else:
         print("❌ No results generated.")
 
