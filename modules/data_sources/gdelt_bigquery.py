@@ -18,58 +18,55 @@ import sys
 import time
 import os
 from datetime import date, timedelta
+# Import BigQuery here to ensure check_bigquery_available works
+try:
+    from google.cloud import bigquery
+except ImportError:
+    bigquery = None # Handle missing dependency gracefully
 
 PLUGIN_NAME = "GDELT BigQuery (Historical)"
 PLUGIN_DESCRIPTION = "Full GDELT archive via BigQuery (2015-present, requires GCP credentials)"
 
+
 def check_bigquery_available():
     """Check if BigQuery is properly configured"""
-    try:
-        from google.cloud import bigquery
-
-        # Check for credentials
-        if not os.getenv('GOOGLE_APPLICATION_CREDENTIALS'):
-            return False, "GOOGLE_APPLICATION_CREDENTIALS environment variable not set"
-
-        # Try to create client
-        try:
-            client = bigquery.Client()
-            return True, None
-        except Exception as e:
-            return False, f"Failed to create BigQuery client: {str(e)}"
-
-    except ImportError:
+    if bigquery is None:
         return False, "google-cloud-bigquery not installed (run: pip install google-cloud-bigquery)"
+    
+    # Check for credentials
+    if not os.getenv('GOOGLE_APPLICATION_CREDENTIALS'):
+        return False, "GOOGLE_APPLICATION_CREDENTIALS environment variable not set"
 
-def fetch_news(ticker, company_name, start_date=None, end_date=None, max_results=10000):
+    # Try to create client
+    try:
+        client = bigquery.Client()
+        return True, None
+    except Exception as e:
+        return False, f"Failed to create BigQuery client: {str(e)}"
+
+# --- REMOVED extract_title_from_url function ---
+
+
+def fetch_news(ticker, company_name, start_date=None, end_date=None, max_per_day=1000):
     """
-    Fetch news from GDELT BigQuery.
+    Fetch news from GDELT BigQuery day-by-day.
 
     Args:
         ticker: Stock symbol (e.g., "META")
         company_name: Company name (e.g., "Meta")
         start_date: datetime.date object (defaults to Sept 1, 2025)
         end_date: datetime.date object (defaults to Sept 30, 2025)
-        max_results: Maximum number of results to return
+        max_per_day: Maximum number of articles to retrieve for EACH day.
 
     Returns:
         pd.DataFrame with columns: url, title, calendar_date, ticker
-
-    Note: Requires BigQuery setup and credentials.
-          Free tier: 1TB queries/month, but GDELT queries can be large.
     """
-    from google.cloud import bigquery
 
     # Check BigQuery availability
     available, error_msg = check_bigquery_available()
     if not available:
         print(f"❌ BigQuery not available: {error_msg}")
-        print("   Setup instructions:")
-        print("   1. Create Google Cloud project: https://console.cloud.google.com")
-        print("   2. Enable BigQuery API")
-        print("   3. Create service account and download JSON key")
-        print("   4. Set environment variable: export GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json")
-        print("   5. Install library: pip install google-cloud-bigquery")
+        print("   Setup instructions in BIGQUERY_SETUP.md")
         return pd.DataFrame()
 
     # Default date range
@@ -78,106 +75,88 @@ def fetch_news(ticker, company_name, start_date=None, end_date=None, max_results
     if end_date is None:
         end_date = date(2025, 9, 30)
 
-    print(f"   Querying GDELT BigQuery from {start_date} to {end_date}...")
+    rows = []
+    total_days = (end_date - start_date).days + 1
     start_time = time.time()
+    
+    day = start_date
+    day_counter = 0
 
-    # Initialize BigQuery client
     client = bigquery.Client()
 
-    # Build query
-    # GDELT 2.0 GKG (Global Knowledge Graph) table
-    # Contains article metadata including URLs and titles
-    # CRITICAL: Use _PARTITIONDATE to limit scan to specific days (Cost: ~15GB vs 1500GB)
-    partition_filter = f"_PARTITIONDATE BETWEEN '{start_date}' AND '{end_date}'"
-
-    query = f"""
-    SELECT
-        DocumentIdentifier as url,
-        DATE(PARSE_TIMESTAMP('%Y%m%d%H%M%S', CAST(DATE AS STRING))) as calendar_date,
-        Themes,
-        Persons,
-        Organizations,
-        Locations,
-        V2Tone as Tone
-    FROM
-        `gdelt-bq.gdeltv2.gkg_partitioned`
-    WHERE
-        {partition_filter}
-        AND DATE(PARSE_TIMESTAMP('%Y%m%d%H%M%S', CAST(DATE AS STRING)))
-            BETWEEN '{start_date.strftime('%Y-%m-%d')}'
-            AND '{end_date.strftime('%Y-%m-%d')}'
-        AND (
-            LOWER(Themes) LIKE '%{ticker.lower()}%'
-            OR LOWER(Themes) LIKE '%{company_name.lower()}%'
-            OR LOWER(Persons) LIKE '%{company_name.lower()}%'
-            OR LOWER(Organizations) LIKE '%{company_name.lower()}%'
-        )
-        AND SourceCommonName IS NOT NULL
-        AND DocumentIdentifier IS NOT NULL
-    LIMIT {max_results}
-    """
-
-    try:
-        # Run query
-        sys.stdout.write(f"\r   Executing BigQuery (this may take a moment)...")
+    print(f"   Querying GDELT BigQuery day-by-day from {start_date} to {end_date}...")
+    
+    while day <= end_date:
+        day_counter += 1
+        
+        # Display progress
+        sys.stdout.write(f"\r   Executing BigQuery [{day_counter}/{total_days}] {day}...")
         sys.stdout.flush()
+        
+        # Prepare filters for the current day
+        date_str = day.strftime('%Y-%m-%d')
+        
+        # Build query: Uses REGEXP_EXTRACT on the Extras field for the actual headline
+        query = f"""
+        SELECT
+            DocumentIdentifier as url,
+            DATE(PARSE_TIMESTAMP('%Y%m%d%H%M%S', CAST(DATE AS STRING))) as calendar_date,
+            V2Tone as Tone,
+            REGEXP_EXTRACT(Extras, r'<PAGE_TITLE>(.*?)</PAGE_TITLE>') AS page_title -- TRUE HEADLINE FIX
+        FROM
+            `gdelt-bq.gdeltv2.gkg_partitioned`
+        WHERE
+            -- CRITICAL: Use partition filter for cost reduction
+            _PARTITIONDATE = '{date_str}'
+            -- Secondary date filter for robustness
+            AND DATE(PARSE_TIMESTAMP('%Y%m%d%H%M%S', CAST(DATE AS STRING))) = '{date_str}'
+            -- Filter out records that don't have a title field, which fixes the garbage output
+            AND Extras LIKE '%<PAGE_TITLE>%'
+            AND (
+                LOWER(Themes) LIKE '%{ticker.lower()}%'
+                OR LOWER(Themes) LIKE '%{company_name.lower()}%'
+                OR LOWER(Persons) LIKE '%{company_name.lower()}%'
+                OR LOWER(Organizations) LIKE '%{company_name.lower()}%'
+            )
+            AND SourceCommonName IS NOT NULL
+        LIMIT {max_per_day}
+        """
 
-        query_job = client.query(query)
-        results = query_job.result()
+        try:
+            query_job = client.query(query)
+            results = query_job.result()
+            
+            # Convert to DataFrame
+            df = results.to_dataframe()
 
-        # Convert to DataFrame
-        df = results.to_dataframe()
-
-        if df.empty:
-            elapsed = time.time() - start_time
-            sys.stdout.write(f"\r   BigQuery completed in {elapsed:.1f}s - No results\n")
+            # --- Post-Processing ---
+            if not df.empty:
+                # Use the extracted page_title as the 'title' column
+                df['title'] = df['page_title'] 
+                df['ticker'] = ticker
+                df = df[['url', 'title', 'calendar_date', 'ticker']]
+                df = df.drop_duplicates(subset=['url'])
+                rows.append(df)
+            
+            # Show daily status
+            sys.stdout.write(f"\r   Executing BigQuery [{day_counter}/{total_days}] {day} - Found {len(df)} articles\n")
             sys.stdout.flush()
-            return pd.DataFrame()
 
-        # Extract title from URL (BigQuery GKG doesn't store titles directly)
-        # We'll need to fetch titles separately or use URL as title
-        df['title'] = df['url'].apply(lambda x: extract_title_from_url(x))
-        df['ticker'] = ticker
+        except Exception as e:
+            sys.stdout.write("\n")
+            print(f"❌ BigQuery error for {day}: {e}")
+            sys.stdout.flush()
 
-        # Select only needed columns
-        df = df[['url', 'title', 'calendar_date', 'ticker']]
+        day += timedelta(days=1)
 
-        # Deduplicate
-        df = df.drop_duplicates(subset=['url'])
+    # Final summary with total time and total articles
+    elapsed_total = time.time() - start_time
+    total_articles = sum(len(df) for df in rows)
+    sys.stdout.write(f"\r   BigQuery query completed in {elapsed_total:.1f}s - Found {total_articles} total articles\n")
+    sys.stdout.flush()
 
-        elapsed = time.time() - start_time
-        sys.stdout.write(f"\r   BigQuery completed in {elapsed:.1f}s - Found {len(df)} articles\n")
-        sys.stdout.flush()
-
-        # Show query stats
-        print(f"   📊 Bytes processed: {query_job.total_bytes_processed / 1e9:.2f} GB")
-        print(f"   📊 Bytes billed: {query_job.total_bytes_billed / 1e9:.2f} GB")
-
-        return df
-
-    except Exception as e:
-        print(f"\n❌ BigQuery error: {e}")
+    if not rows:
         return pd.DataFrame()
-
-def extract_title_from_url(url):
-    """
-    Extract a readable title from URL.
-    This is a fallback since BigQuery GKG doesn't store article titles.
-    For production, you might want to scrape the actual titles.
-    """
-    if not url:
-        return "Unknown"
-
-    # Remove protocol
-    url = url.replace('http://', '').replace('https://', '')
-
-    # Take domain + path
-    parts = url.split('/')
-    if len(parts) > 1:
-        # Try to get article slug
-        slug = parts[-1].replace('-', ' ').replace('_', ' ')
-        # Remove file extensions
-        slug = slug.split('.')[0]
-        return slug[:100]  # Truncate
-
-    return url[:100]
+    
+    df_final = pd.concat(rows, ignore_index=True)
+    return df_final
