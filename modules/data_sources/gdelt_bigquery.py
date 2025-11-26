@@ -17,6 +17,7 @@ import pandas as pd
 import sys
 import time
 import os
+import re
 from datetime import date, timedelta
 from config import DATA_START_DATE, NEWS_PREDICTION_END_DATE 
 
@@ -145,13 +146,27 @@ def fetch_news(ticker, company_name, start_date=None, end_date=None, max_per_day
                 df = df[df['title'].astype(str).str.strip() != '']
                 
                 # Redundant safety filter (Python side)
-                # Just in case the regex missed an edge case, we do a final strict check on the TITLE.
-                strict_ticker = rf'\b{ticker}\b'
-                strict_name = rf'\b{company_name}\b'
-                
-                mask = df["title"].str.contains(strict_ticker, case=False, regex=True) | \
-                       df["title"].str.contains(strict_name, case=False, regex=True)
-                
+                # Just in case the regex missed an edge case, we do a final check on the TITLE.
+                # Extract meaningful keywords from company name (handle special characters)
+
+                # Build flexible patterns for company name
+                # For "Alphabet (Google)", we want to match "Alphabet" OR "Google"
+                # For "Meta Platforms", we want to match "Meta" OR "Platforms"
+                company_keywords = re.split(r'[\s\(\)]', company_name)
+                company_keywords = [kw.strip() for kw in company_keywords if len(kw.strip()) > 2]
+
+                # Ticker pattern (word boundary)
+                strict_ticker = rf'\b{re.escape(ticker)}\b'
+
+                # Build OR pattern for all company keywords
+                # Escape special regex chars, use word boundaries
+                company_patterns = [rf'\b{re.escape(kw)}\b' for kw in company_keywords]
+
+                # Check if title contains ticker OR any company keyword
+                mask = df["title"].str.contains(strict_ticker, case=False, regex=True, na=False)
+                for pattern in company_patterns:
+                    mask |= df["title"].str.contains(pattern, case=False, regex=True, na=False)
+
                 df = df[mask]
                 
                 # Final deduplication

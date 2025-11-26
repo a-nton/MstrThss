@@ -16,7 +16,7 @@ CONFIDENCE_THRESHOLD = 0.70
 # --- DATA SETTINGS ---
 # Define the assets to track
 ASSETS = [
-    {"symbol": "META", "name": "Meta Platforms"},
+    {"symbol": "GOOGL", "name": "Alphabet (Google)"},
 ]
 
 # GDELT Settings

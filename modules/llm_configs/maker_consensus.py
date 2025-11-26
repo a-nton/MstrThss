@@ -179,7 +179,7 @@ async def run_council(row, model_name, horizons):
 
     # Fetch historical volatility for calibration
     ticker = row.get('ticker', 'UNKNOWN')
-    vol_daily, vol_annual = get_historical_volatility(ticker)
+    vol_daily_baseline, vol_annual, vol_daily_recent = get_historical_volatility(ticker)
 
     # 1. Parallel Execution (Bull vs Bear + Technical + Sentiment)
     results = await asyncio.gather(
@@ -218,6 +218,18 @@ async def run_council(row, model_name, horizons):
     # 2. Calculate ensemble for EACH horizon
     output = {}
 
+    # Calculate volatility penalty for confidence dampening
+    # When recent volatility exceeds historical baseline, reduce directional confidence
+    # This pushes predictions toward neutral (50%) during high-volatility periods
+    #
+    # vol_daily_baseline: 20-day rolling std (baseline "normal" volatility)
+    # vol_daily_recent: 5-day rolling std (recent volatility for spike detection)
+    #
+    # Example: If recent vol is 2x baseline, penalty = 0.5, confidence is halved
+    normal_vol = vol_daily_baseline  # Historical baseline (20-day)
+    current_vol = vol_daily_recent   # Recent volatility (5-day)
+    vol_penalty = min(1.0, normal_vol / max(current_vol, 0.001))
+
     for h_name, h_days in horizons.items():
         # Get horizon-specific data from each agent
         bull_h = bull.get(h_name, {})
@@ -239,8 +251,13 @@ async def run_council(row, model_name, horizons):
             weights["sentiment"] * sent_score
         ) / total_weight
 
+        # Apply volatility penalty to directional confidence
+        # High volatility → shrink score toward 0 (neutral)
+        # Example: If vol is 2x normal, penalty is 0.5, score is halved
+        adjusted_score = ensemble_score * vol_penalty
+
         # Map to probability: -1 → 0%, 0 → 50%, +1 → 100%
-        prob = 0.5 + (0.5 * ensemble_score)
+        prob = 0.5 + (0.5 * adjusted_score)
         prob = max(0.0, min(1.0, prob))
 
         output[f"prob_up_{h_name}"] = prob
@@ -273,7 +290,7 @@ async def run_council(row, model_name, horizons):
         # No dampening applied - use raw prediction
         final_magnitude = calibrate_magnitude(
             avg_move_raw,
-            vol_daily,
+            vol_daily_baseline,
             horizon_days=h_days,
             dampening_factor=0.35
         )

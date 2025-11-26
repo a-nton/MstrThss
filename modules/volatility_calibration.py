@@ -17,19 +17,21 @@ from datetime import datetime, timedelta
 # Cache volatility to avoid repeated API calls
 _volatility_cache = {}
 
-def get_historical_volatility(ticker, window=20, use_cache=True):
+def get_historical_volatility(ticker, window=20, recent_window=5, use_cache=True):
     """
     Fetch historical price data and calculate realized volatility.
 
     Args:
         ticker: Stock ticker symbol (e.g., 'AMZN')
-        window: Rolling window for volatility calculation (default: 20 days)
+        window: Rolling window for baseline volatility (default: 20 days)
+        recent_window: Rolling window for recent volatility (default: 5 days)
         use_cache: Use cached volatility if available (default: True)
 
     Returns:
-        tuple: (volatility_daily, volatility_annualized)
-               volatility_daily: Daily standard deviation of returns
-               volatility_annualized: Annualized volatility (daily * sqrt(252))
+        tuple: (vol_daily_baseline, vol_annual, vol_daily_recent)
+               vol_daily_baseline: 20-day rolling std (baseline "normal" vol)
+               vol_annual: Annualized volatility (daily * sqrt(252))
+               vol_daily_recent: 5-day rolling std (recent volatility for spike detection)
     """
     # Check cache first
     if use_cache and ticker in _volatility_cache:
@@ -57,20 +59,26 @@ def get_historical_volatility(ticker, window=20, use_cache=True):
             print(f"⚠️  Insufficient data for {ticker} (only {len(returns)} days), using default")
             return _use_default_volatility(ticker)
 
-        # Rolling volatility (using last window period)
-        vol_daily = returns.rolling(window).std().iloc[-1]
+        # Baseline volatility (20-day rolling window)
+        vol_daily_baseline = returns.rolling(window).std().iloc[-1]
+
+        # Recent volatility (5-day rolling window for spike detection)
+        vol_daily_recent = returns.rolling(recent_window).std().iloc[-1] if len(returns) >= recent_window else vol_daily_baseline
 
         # Handle NaN
-        if pd.isna(vol_daily):
+        if pd.isna(vol_daily_baseline):
             return _use_default_volatility(ticker)
 
+        if pd.isna(vol_daily_recent):
+            vol_daily_recent = vol_daily_baseline
+
         # Annualized volatility
-        vol_annual = vol_daily * np.sqrt(252)
+        vol_annual = vol_daily_baseline * np.sqrt(252)
 
-        # Cache result
-        _volatility_cache[ticker] = (vol_daily, vol_annual)
+        # Cache result (now includes recent vol)
+        _volatility_cache[ticker] = (vol_daily_baseline, vol_annual, vol_daily_recent)
 
-        return vol_daily, vol_annual
+        return vol_daily_baseline, vol_annual, vol_daily_recent
 
     except Exception as e:
         print(f"⚠️  Error fetching volatility for {ticker}: {e}")
@@ -88,9 +96,10 @@ def _use_default_volatility(ticker):
     """
     default_daily = 0.015  # 1.5% daily
     default_annual = 0.24  # 24% annual
+    default_recent = default_daily  # Assume recent = baseline when no data
 
-    _volatility_cache[ticker] = (default_daily, default_annual)
-    return default_daily, default_annual
+    _volatility_cache[ticker] = (default_daily, default_annual, default_recent)
+    return default_daily, default_annual, default_recent
 
 
 def calibrate_magnitude(

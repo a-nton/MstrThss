@@ -249,9 +249,9 @@ def generate_bokeh_dashboard(df, output_folder):
 
     for ticker_idx, ticker in enumerate(tickers):
         ticker_color = colors[ticker_idx % 10]
-        horizon_plots = []
+        horizon_tabs = []
 
-        # Loop through horizons
+        # Loop through horizons - each becomes a tab
         for h_name in HORIZONS.keys():
             prob_col = f"prob_up_{h_name}"
             exp_col = f"exp_move_pct_{h_name}"
@@ -366,13 +366,13 @@ def generate_bokeh_dashboard(df, output_folder):
 
             metrics_html = perm_html + cal_html + metrics_html
 
-            metrics_div = Div(text=metrics_html, width=1000)
+            metrics_div = Div(text=metrics_html, width=700)
 
             p = figure(
                 title=f"{ticker} - Horizon: {h_name.upper()}",
                 x_axis_type="datetime",
-                width=1000,
-                height=400,
+                width=700,
+                height=350,
                 background_fill_color="#fafafa"
             )
 
@@ -437,8 +437,8 @@ def generate_bokeh_dashboard(df, output_folder):
                 title=f"{ticker} - {h_name.upper()} Magnitude Analysis (\"Whale Plot\")",
                 x_axis_label="Predicted Absolute Return (%)",
                 y_axis_label="Actual Absolute Return (%)",
-                width=1000,
-                height=400,
+                width=700,
+                height=350,
                 background_fill_color="#fafafa"
             )
 
@@ -490,19 +490,24 @@ def generate_bokeh_dashboard(df, output_folder):
 
                     if is_monotonic and acc_improvement > 10:
                         cal_quality = "Well-calibrated (confidence correlates with accuracy)"
-                        cal_color = "#d4edda"
+                        cal_color = "#f0f9f4"  # Very light green
+                        border_color = "#5cb85c"
                     elif acc_improvement > 5:
                         cal_quality = "Moderately calibrated"
-                        cal_color = "#fff3cd"
+                        cal_color = "#fefef0"  # Very light yellow
+                        border_color = "#f0ad4e"
                     elif acc_improvement < -5:
                         cal_quality = "Poorly calibrated (higher confidence = lower accuracy)"
-                        cal_color = "#f8d7da"
+                        cal_color = "#fef5f5"  # Very light red
+                        border_color = "#d9534f"
                     else:
                         cal_quality = "Poorly calibrated (confidence doesn't predict accuracy)"
-                        cal_color = "#ffc107"
+                        cal_color = "#fefef0"  # Very light yellow
+                        border_color = "#f0ad4e"
                 else:
                     cal_quality = "Insufficient data"
-                    cal_color = "#e2e3e5"
+                    cal_color = "#f5f5f5"  # Light gray
+                    border_color = "#999"
 
                 # Build compact table
                 table_rows = ""
@@ -530,7 +535,7 @@ def generate_bokeh_dashboard(df, output_folder):
                     """
 
                 calibration_html = f"""
-                <div style="background: {cal_color}; padding: 8px; border-radius: 5px; margin-bottom: 10px; border-left: 4px solid #007bff;">
+                <div style="background: {cal_color}; padding: 8px; border-radius: 5px; margin-bottom: 10px; border-left: 4px solid {border_color};">
                     <div style="font-weight: bold; font-size: 11px; margin-bottom: 5px;">
                         Confidence Calibration: {cal_quality}
                     </div>
@@ -552,29 +557,32 @@ def generate_bokeh_dashboard(df, output_folder):
                 </div>
                 """
 
-                calibration_div = Div(text=calibration_html, width=490)
+                calibration_div = Div(text=calibration_html, width=700)
 
-                # Arrange Whale plot and Calibration table side by side
-                # Adjust whale plot width to fit in row layout
-                whale_plot.width = 490
+                # Create grid layout
+                # Row 1: Metrics stats and Calibration table side-by-side
+                row_top = row(metrics_div, calibration_div)
 
-                # Create side-by-side layout for whale plot and calibration table
-                side_by_side = row(whale_plot, calibration_div)
+                # Row 2: Main time series plot and Whale plot
+                row_plots = row(p, whale_plot)
 
-                # Add all plots for this horizon in order
-                horizon_plots.append(metrics_div)
-                horizon_plots.append(p)
-                horizon_plots.append(side_by_side)
+                # Combine into a single horizon layout
+                horizon_layout = column([row_top, row_plots])
+
+                # Add this horizon as a tab
+                horizon_tabs.append(TabPanel(child=horizon_layout, title=h_name.upper()))
             else:
-                # No calibration data, just add whale plot alone
-                horizon_plots.append(metrics_div)
-                horizon_plots.append(p)
-                horizon_plots.append(whale_plot)
+                # No calibration data, just put main plot and whale plot side by side
+                row1 = row(p, whale_plot)
+                horizon_layout = column([metrics_div, row1])
 
-        if horizon_plots:
-            # Combine all horizon plots for this ticker into a panel
-            ticker_layout = column(horizon_plots)
-            ticker_tabs.append(TabPanel(child=ticker_layout, title=ticker))
+                # Add this horizon as a tab
+                horizon_tabs.append(TabPanel(child=horizon_layout, title=h_name.upper()))
+
+        if horizon_tabs:
+            # Create nested tabs for this ticker's horizons
+            horizon_tabs_widget = Tabs(tabs=horizon_tabs)
+            ticker_tabs.append(TabPanel(child=horizon_tabs_widget, title=ticker))
 
     # Build final layout
     layout_elements = []
@@ -583,7 +591,7 @@ def generate_bokeh_dashboard(df, output_folder):
     layout_elements.append(Div(text="""
         <div style="font-family: sans-serif; text-align: center; margin-bottom: 20px;">
             <h2 style="color: #2c3e50;">GDELT Stock Prediction Dashboard</h2>
-            <p style="color: #7f8c8d;">Select a ticker tab to view predictions vs actuals</p>
+            <p style="color: #7f8c8d;">Select a ticker, then choose a horizon (1D, 1W, 1M) to view predictions vs actuals</p>
         </div>
     """))
 
