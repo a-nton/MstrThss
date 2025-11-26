@@ -36,75 +36,55 @@ def get_temperature():
 def prompt_bull_case(row):
     headlines = row.get("headline_text", "No news.")
     return f"""
-Role: Bull Case Analyst (Growth & Opportunity Focused)
-Task: Build the strongest possible BULLISH case based on these headlines.
+Role: Financial Analyst
+Task: Analyze the following headlines and assess their impact on stock price direction and magnitude for three time horizons: 1 day, 1 week, and 1 month.
 
-Look for:
-- Revenue growth signals and market expansion
-- Positive earnings surprises or guidance raises
-- Strategic wins (contracts, partnerships, M&A)
-- Innovation and competitive advantages
-- Market share gains and pricing power
-- Strong management execution
-- Regulatory tailwinds or resolved uncertainties
+In your analysis, consider potential positive developments and growth opportunities alongside any risks. Evaluate the strength of catalysts and competitive positioning.
 
-Your job is to identify genuine positive catalysts and growth drivers. Be optimistic but not delusional - only highlight signals with substance.
+Consider how the impact may differ across time horizons:
+- Short-term (1d): Immediate market reaction
+- Medium-term (1w): How the news develops over a week
+- Long-term (1m): Sustained impact and fundamental changes
 
 Headlines:
 {headlines}
 
 Return valid JSON:
 {{
-  "signal": "BULLISH" | "NEUTRAL",
-  "confidence": 0.0-1.0,
-  "expected_move_pct": 0.0-3.0,
-  "reason": "Strongest bull case based on evidence."
+  "1d": {{"signal": "BULLISH|BEARISH|NEUTRAL", "confidence": 0.0-1.0, "expected_move_pct": <number>}},
+  "1w": {{"signal": "BULLISH|BEARISH|NEUTRAL", "confidence": 0.0-1.0, "expected_move_pct": <number>}},
+  "1m": {{"signal": "BULLISH|BEARISH|NEUTRAL", "confidence": 0.0-1.0, "expected_move_pct": <number>}},
+  "reason": "Your assessment explaining differences across horizons if any."
 }}
 
-Note on magnitude:
-- 0.3-0.8% = Minor positive news
-- 0.8-1.5% = Moderate catalyst
-- 1.5-2.5% = Major catalyst (earnings beat, M&A)
-- 2.5-3.0% = Extraordinary event only
-
-Note: You can only return BULLISH or NEUTRAL. If you see no positive catalysts, return NEUTRAL with low confidence.
+For expected_move_pct, estimate the magnitude in percentage terms based on the news significance and historical context.
 """
 
 def prompt_bear_case(row):
     headlines = row.get("headline_text", "No news.")
     return f"""
-Role: Bear Case Analyst (Risk & Headwind Focused)
-Task: Build the strongest possible BEARISH case based on these headlines.
+Role: Financial Analyst
+Task: Analyze the following headlines and assess their impact on stock price direction and magnitude for three time horizons: 1 day, 1 week, and 1 month.
 
-Look for:
-- Revenue misses, slowing growth, or guidance cuts
-- Regulatory risks, lawsuits, or compliance issues
-- Competitive threats and market share losses
-- Execution failures or management turnover
-- Rising costs, margin compression, or pricing pressure
-- Macroeconomic headwinds affecting the sector
-- Overvaluation signals or deteriorating fundamentals
+In your analysis, consider potential risks and headwinds alongside any opportunities. Evaluate execution challenges and competitive threats.
 
-Your job is to identify genuine risks and negative catalysts. Be critical but not paranoid - only highlight substantive concerns.
+Consider how the impact may differ across time horizons:
+- Short-term (1d): Immediate market reaction
+- Medium-term (1w): How risks develop over a week
+- Long-term (1m): Sustained impact and fundamental deterioration
 
 Headlines:
 {headlines}
 
 Return valid JSON:
 {{
-  "signal": "BEARISH" | "NEUTRAL",
-  "confidence": 0.0-1.0,
-  "expected_move_pct": 0.0-3.0,
-  "reason": "Strongest bear case based on evidence."
+  "1d": {{"signal": "BULLISH|BEARISH|NEUTRAL", "confidence": 0.0-1.0, "expected_move_pct": <number>}},
+  "1w": {{"signal": "BULLISH|BEARISH|NEUTRAL", "confidence": 0.0-1.0, "expected_move_pct": <number>}},
+  "1m": {{"signal": "BULLISH|BEARISH|NEUTRAL", "confidence": 0.0-1.0, "expected_move_pct": <number>}},
+  "reason": "Your assessment explaining differences across horizons if any."
 }}
 
-Note on magnitude:
-- 0.3-0.8% = Minor negative news
-- 0.8-1.5% = Moderate risk
-- 1.5-2.5% = Major risk (revenue miss, lawsuit)
-- 2.5-3.0% = Extraordinary event only
-
-Note: You can only return BEARISH or NEUTRAL. If you see no significant risks, return NEUTRAL with low confidence.
+For expected_move_pct, estimate the magnitude in percentage terms based on the news significance and historical context.
 """
 
 def prompt_technical(row):
@@ -124,62 +104,54 @@ def prompt_technical(row):
 {tech_summary}"""
 
     return f"""
-Role: Technical Analyst (Price Action & Indicators Specialist)
-Task: Analyze technical indicators and price momentum to identify directional signals.
+Role: Financial Analyst
+Task: Analyze the technical indicators and price momentum to assess directional signals for three time horizons: 1 day, 1 week, and 1 month.
 
 {context}
 
-Guidelines:
-- RSI <30 = Oversold (potential bounce), >70 = Overbought (potential pullback)
-- MACD > Signal = Bullish momentum, MACD < Signal = Bearish momentum
-- Price above MAs = Uptrend, below MAs = Downtrend
-- High volatility = Lower confidence (less predictable)
-- Only predict moves >1.5% when multiple indicators strongly align
+Consider how price action, momentum indicators, and volatility patterns inform the current market structure and potential price movements across different timeframes.
+
+Consider how technical signals may differ across time horizons:
+- Short-term (1d): Oversold/overbought conditions, immediate momentum
+- Medium-term (1w): Trend strength, moving average crossovers
+- Long-term (1m): Major trend direction, support/resistance levels
 
 Return valid JSON:
 {{
-  "signal": "BULLISH" | "BEARISH" | "NEUTRAL",
-  "confidence": 0.0-1.0,
-  "expected_move_pct": 0.0-2.0,
-  "reason": "Which indicators align and what they suggest."
+  "1d": {{"signal": "BULLISH|BEARISH|NEUTRAL", "confidence": 0.0-1.0, "expected_move_pct": <number>}},
+  "1w": {{"signal": "BULLISH|BEARISH|NEUTRAL", "confidence": 0.0-1.0, "expected_move_pct": <number>}},
+  "1m": {{"signal": "BULLISH|BEARISH|NEUTRAL", "confidence": 0.0-1.0, "expected_move_pct": <number>}},
+  "reason": "Your analysis explaining technical signals across horizons."
 }}
 
-Note: Base magnitude on volatility. If 20d volatility is 1.5%, a normal move is ±1.5%.
+For expected_move_pct, estimate the magnitude in percentage terms based on the strength of technical signals and typical volatility
 """
 
 def prompt_sentiment(row):
     headlines = row.get("headline_text", "No news.")
     return f"""
-Role: Market Psychologist (Sentiment & Behavioral Analyst)
-Task: Analyze how these headlines will affect market psychology and investor behavior.
+Role: Financial Analyst
+Task: Analyze how these headlines will affect market psychology and investor behavior across three time horizons: 1 day, 1 week, and 1 month.
 
-Consider both perspectives:
+Consider both immediate emotional reactions and potential contrarian signals. Evaluate headline volume, tone, and whether sentiment appears balanced or overdone.
 
-Momentum view:
-- Positive news flow can drive buying pressure
-- Negative news creates fear and selling
-- Volume and intensity of coverage matters
-
-Contrarian view:
-- Excessive optimism may signal overbought conditions
-- Extreme pessimism may signal oversold conditions
-- "Everyone knows" news is often priced in
-- Hype and FOMO can precede reversals
-
-Weigh the immediate emotional reaction against contrarian signals. Consider headline volume, tone, and whether sentiment appears overdone in either direction.
+Consider how sentiment impact may differ across time horizons:
+- Short-term (1d): Initial emotional reaction, headline-driven moves
+- Medium-term (1w): Sentiment persistence vs. fade, narrative development
+- Long-term (1m): Fundamental reassessment, lasting perception changes
 
 Headlines:
 {headlines}
 
 Return valid JSON:
 {{
-  "signal": "BULLISH" | "BEARISH" | "NEUTRAL",
-  "confidence": 0.0-1.0,
-  "expected_move_pct": 0.0-3.0,
-  "reason": "Justification based on market psychology."
+  "1d": {{"signal": "BULLISH|BEARISH|NEUTRAL", "confidence": 0.0-1.0, "expected_move_pct": <number>}},
+  "1w": {{"signal": "BULLISH|BEARISH|NEUTRAL", "confidence": 0.0-1.0, "expected_move_pct": <number>}},
+  "1m": {{"signal": "BULLISH|BEARISH|NEUTRAL", "confidence": 0.0-1.0, "expected_move_pct": <number>}},
+  "reason": "Your assessment of sentiment evolution across horizons."
 }}
 
-Note: Sentiment-driven moves are typically <2%. Only predict >2% for extreme sentiment shifts.
+For expected_move_pct, estimate the magnitude in percentage terms based on the sentiment intensity and how it may evolve.
 """
 
 # --- ASYNC AGENT HANDLER ---
@@ -224,13 +196,13 @@ async def run_council(row, model_name, horizons):
     tech = data['technical']
     sent = data['sentiment']
 
-    # --- REFINED CONSENSUS LOGIC (4-Agent Weighted Ensemble) ---
+    # --- HORIZON-SPECIFIC CONSENSUS LOGIC (4-Agent Weighted Ensemble) ---
 
-    # Convert each agent's signal + confidence into a directional score
+    # Convert each agent's horizon-specific signal + confidence into a directional score
     # Score range: -1 (bearish) to +1 (bullish)
-    def agent_to_score(agent):
-        signal = agent.get("signal", "NEUTRAL").upper()
-        confidence = float(agent.get("confidence", 0.5))
+    def agent_to_score(agent_horizon_data):
+        signal = agent_horizon_data.get("signal", "NEUTRAL").upper()
+        confidence = float(agent_horizon_data.get("confidence", 0.5))
 
         if signal == "BULLISH":
             return confidence  # 0.0 to 1.0
@@ -239,96 +211,85 @@ async def run_council(row, model_name, horizons):
         else:
             return 0.0  # Neutral = no opinion
 
-    bull_score = agent_to_score(bull)
-    bear_score = agent_to_score(bear)
-    tech_score = agent_to_score(tech)
-    sent_score = agent_to_score(sent)
-
-    # Weighted average of all four agents
-    # Equal weights by default (can be tuned later)
+    # Agent weights (equal by default)
     weights = {"bull": 1.0, "bear": 1.0, "technical": 1.0, "sentiment": 1.0}
     total_weight = sum(weights.values())
 
-    ensemble_score = (
-        weights["bull"] * bull_score +
-        weights["bear"] * bear_score +
-        weights["technical"] * tech_score +
-        weights["sentiment"] * sent_score
-    ) / total_weight
-
-    # Ensemble score is now in range [-1, +1]
-    # Map to probability: -1 → 0%, 0 → 50%, +1 → 100%
-    prob = 0.5 + (0.5 * ensemble_score)
-
-    # Clamp to [0, 1] for safety
-    prob = max(0.0, min(1.0, prob))
-
-    # Determine consensus description
-    votes_list = [
-        bull.get("signal", "NEUTRAL").upper(),
-        bear.get("signal", "NEUTRAL").upper(),
-        tech.get("signal", "NEUTRAL").upper(),
-        sent.get("signal", "NEUTRAL").upper()
-    ]
-
-    vote_counts = {"BULLISH": votes_list.count("BULLISH"),
-                   "BEARISH": votes_list.count("BEARISH"),
-                   "NEUTRAL": votes_list.count("NEUTRAL")}
-
-    if ensemble_score > 0.15:
-        final_reason = f"Ensemble Bullish (score: {ensemble_score:.2f}). Bull: {bull_score:.2f}, Bear: {bear_score:.2f}, Tech: {tech_score:.2f}, Sent: {sent_score:.2f}"
-    elif ensemble_score < -0.15:
-        final_reason = f"Ensemble Bearish (score: {ensemble_score:.2f}). Bull: {bull_score:.2f}, Bear: {bear_score:.2f}, Tech: {tech_score:.2f}, Sent: {sent_score:.2f}"
-    else:
-        final_reason = f"Ensemble Neutral (score: {ensemble_score:.2f}). Bull: {bull_score:.2f}, Bear: {bear_score:.2f}, Tech: {tech_score:.2f}, Sent: {sent_score:.2f}"
-
-    # 3. Determine Magnitude (Average of ALL agents, weighted by abs(score))
-    moves = []
-    weights_mag = []
-
-    if abs(bull_score) > 0.01:
-        moves.append(float(bull.get("expected_move_pct", 0)))
-        weights_mag.append(abs(bull_score))
-
-    if abs(bear_score) > 0.01:
-        moves.append(float(bear.get("expected_move_pct", 0)))
-        weights_mag.append(abs(bear_score))
-
-    if abs(tech_score) > 0.01:
-        moves.append(float(tech.get("expected_move_pct", 0)))
-        weights_mag.append(abs(tech_score))
-
-    if abs(sent_score) > 0.01:
-        moves.append(float(sent.get("expected_move_pct", 0)))
-        weights_mag.append(abs(sent_score))
-
-    if moves and weights_mag:
-        avg_move_raw = sum(m * w for m, w in zip(moves, weights_mag)) / sum(weights_mag)
-    else:
-        avg_move_raw = 0.0
-
-    # 4. Format Output with VOLATILITY CALIBRATION
+    # 2. Calculate ensemble for EACH horizon
     output = {}
 
     for h_name, h_days in horizons.items():
+        # Get horizon-specific data from each agent
+        bull_h = bull.get(h_name, {})
+        bear_h = bear.get(h_name, {})
+        tech_h = tech.get(h_name, {})
+        sent_h = sent.get(h_name, {})
+
+        # Calculate scores for this horizon
+        bull_score = agent_to_score(bull_h)
+        bear_score = agent_to_score(bear_h)
+        tech_score = agent_to_score(tech_h)
+        sent_score = agent_to_score(sent_h)
+
+        # Weighted ensemble for this horizon
+        ensemble_score = (
+            weights["bull"] * bull_score +
+            weights["bear"] * bear_score +
+            weights["technical"] * tech_score +
+            weights["sentiment"] * sent_score
+        ) / total_weight
+
+        # Map to probability: -1 → 0%, 0 → 50%, +1 → 100%
+        prob = 0.5 + (0.5 * ensemble_score)
+        prob = max(0.0, min(1.0, prob))
+
         output[f"prob_up_{h_name}"] = prob
 
-        # Apply volatility-based calibration to magnitude
-        # This fixes the 3.38x overestimation problem
-        calibrated_magnitude = calibrate_magnitude(
+        # 3. Determine Magnitude (simple average, directionless)
+        # Collect all magnitude predictions from agents
+        moves = []
+
+        # Include all agent predictions (magnitude is directionless)
+        bull_move = float(bull_h.get("expected_move_pct", 0))
+        bear_move = float(bear_h.get("expected_move_pct", 0))
+        tech_move = float(tech_h.get("expected_move_pct", 0))
+        sent_move = float(sent_h.get("expected_move_pct", 0))
+
+        if bull_move > 0:
+            moves.append(bull_move)
+        if bear_move > 0:
+            moves.append(bear_move)
+        if tech_move > 0:
+            moves.append(tech_move)
+        if sent_move > 0:
+            moves.append(sent_move)
+
+        # Simple average (no weighting by confidence)
+        if moves:
+            avg_move_raw = sum(moves) / len(moves)
+        else:
+            avg_move_raw = 0.0
+
+        # No dampening applied - use raw prediction
+        final_magnitude = calibrate_magnitude(
             avg_move_raw,
             vol_daily,
             horizon_days=h_days,
-            dampening_factor=0.35  # Empirical: reduces 5.5% → 1.9% (closer to 1.6% actual)
+            dampening_factor=0.35
         )
-        output[f"exp_move_pct_{h_name}"] = calibrated_magnitude
+        output[f"exp_move_pct_{h_name}"] = final_magnitude
 
-    # Export details for visualization (4 agents now)
-    output["justification"] = final_reason
-    output["agent_bull"] = f"{votes_list[0]} (conf:{bull.get('confidence', 0):.2f}) - {bull.get('reason', 'N/A')}"
-    output["agent_bear"] = f"{votes_list[1]} (conf:{bear.get('confidence', 0):.2f}) - {bear.get('reason', 'N/A')}"
-    output["agent_technical"] = f"{votes_list[2]} (conf:{tech.get('confidence', 0):.2f}) - {tech.get('reason', 'N/A')}"
-    output["agent_sentiment"] = f"{votes_list[3]} (conf:{sent.get('confidence', 0):.2f}) - {sent.get('reason', 'N/A')}"
+    # 4. Export agent details (use 1d horizon for display)
+    bull_1d = bull.get("1d", {})
+    bear_1d = bear.get("1d", {})
+    tech_1d = tech.get("1d", {})
+    sent_1d = sent.get("1d", {})
+
+    output["justification"] = f"Multi-horizon ensemble. Bull: {bull.get('reason', 'N/A')} | Bear: {bear.get('reason', 'N/A')}"
+    output["agent_bull"] = f"{bull_1d.get('signal', 'NEUTRAL')} (conf:{bull_1d.get('confidence', 0):.2f}) - {bull.get('reason', 'N/A')}"
+    output["agent_bear"] = f"{bear_1d.get('signal', 'NEUTRAL')} (conf:{bear_1d.get('confidence', 0):.2f}) - {bear.get('reason', 'N/A')}"
+    output["agent_technical"] = f"{tech_1d.get('signal', 'NEUTRAL')} (conf:{tech_1d.get('confidence', 0):.2f}) - {tech.get('reason', 'N/A')}"
+    output["agent_sentiment"] = f"{sent_1d.get('signal', 'NEUTRAL')} (conf:{sent_1d.get('confidence', 0):.2f}) - {sent.get('reason', 'N/A')}"
 
     # Keep old column names for backward compatibility with existing viz
     output["agent_fundamental"] = output["agent_bull"]  # Map Bull to old "fundamental" column

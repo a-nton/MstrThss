@@ -101,90 +101,39 @@ def calibrate_magnitude(
     max_sigma=2.0
 ):
     """
-    Calibrate LLM-predicted magnitude using historical volatility.
+    Return the raw predicted magnitude without dampening.
 
-    Problem: LLMs predict ~5.5% average moves, but reality is ~1.6% (3.38x overestimation)
-
-    Solution: Scale predictions using:
-    1. Historical volatility (realistic baseline)
-    2. Horizon-adjusted dampening (longer horizons need less dampening)
-    3. Maximum sigma cap (prevent absurd predictions)
+    Since magnitude is directionless, we use the simple average of agent predictions
+    as the final magnitude estimate. No volatility-based scaling is applied.
 
     Args:
-        predicted_move: Raw LLM prediction in % (e.g., 5.5)
-        volatility_daily: Historical daily volatility (e.g., 0.015 = 1.5%)
-        horizon_days: Prediction horizon (1, 5, 21)
-        dampening_factor: Base scaling factor for 1-day (default: 0.35)
-        max_sigma: Cap predictions at N standard deviations (default: 2.0)
+        predicted_move: Raw LLM prediction in % (e.g., 1.5)
+        volatility_daily: Historical daily volatility (not used, kept for compatibility)
+        horizon_days: Prediction horizon (not used, kept for compatibility)
+        dampening_factor: Not used (kept for compatibility)
+        max_sigma: Not used (kept for compatibility)
 
     Returns:
-        Calibrated magnitude in percentage (e.g., 1.65)
+        Raw predicted magnitude in percentage (e.g., 1.5)
 
     Example:
-        >>> vol_daily = 0.015  # 1.5% daily volatility
-        >>> predicted = 5.5    # LLM says 5.5% move
-        >>> calibrate_magnitude(predicted, vol_daily, horizon_days=1)
-        1.65  # Calibrated to 1.65%
+        >>> predicted = 1.5    # LLM says 1.5% move
+        >>> calibrate_magnitude(predicted, 0.015, horizon_days=1)
+        1.5  # Returns raw prediction
     """
-    # Expected move based on volatility (1σ move over horizon)
-    vol_horizon = volatility_daily * np.sqrt(horizon_days) * 100  # Convert to %
-
-    # LLM confidence (normalize to 0-2 multiplier)
-    # If LLM predicts 5% out of max 10%, that's 50% → 1.0x multiplier
-    max_prediction = 10.0  # Typical prompt range
-    confidence_mult = (predicted_move / max_prediction) * 2.0
-
-    # Realistic maximum (max_sigma standard deviations with confidence multiplier)
-    max_realistic = vol_horizon * max_sigma * confidence_mult
-
-    # Cap prediction to realistic maximum
-    capped_move = min(predicted_move, max_realistic)
-
-    # Horizon-adjusted calibration
-    # Strategy: Use volatility as baseline, scale by horizon, adjust for LLM confidence
-
-    # Base magnitude on volatility * sqrt(horizon)
-    vol_based_magnitude = vol_horizon
-
-    # Confidence adjustment (how strong is the LLM's conviction?)
-    # Normalize predicted_move to confidence (0-1 scale based on typical range 0-3%)
-    typical_max = 3.0  # After prompt updates, agents predict 0-3%
-    confidence_factor = min(predicted_move / typical_max, 1.0)
-
-    # Horizon-specific calibration factors (empirically tuned)
-    if horizon_days == 1:
-        # 1-day: More aggressive dampening
-        # Target: 1.6% actual, vol_horizon ~3.1%, prediction ~1.5%
-        # Need: 1.6 / (3.1 * 1.25) ≈ 0.41
-        scale_factor = 0.45
-    elif horizon_days <= 7:
-        # 1-week: Moderate dampening
-        # Target: 4.76% actual, vol_horizon ~7%, prediction ~1.5%
-        # Need: 4.76 / (7.0 * 1.25) ≈ 0.54
-        scale_factor = 0.55
-    else:
-        # 1-month: Light dampening
-        # Target: 10% actual, vol_horizon ~14.3%, prediction ~1.5%
-        # Need: 10 / (14.3 * 1.25) ≈ 0.56
-        scale_factor = 0.60
-
-    # Apply confidence boost (higher confidence → larger move within volatility bounds)
-    confidence_boost = 1.0 + (confidence_factor * 0.5)  # 1.0x to 1.5x boost
-
-    # Final calibration
-    calibrated_move = vol_based_magnitude * scale_factor * confidence_boost
-
-    return calibrated_move
+    # Return raw prediction without any dampening
+    return predicted_move
 
 
-def get_calibration_metrics(df):
+def get_calibration_metrics(df, horizon='1d'):
     """
     Calculate magnitude calibration metrics from results DataFrame.
 
     Args:
         df: Results DataFrame with columns:
-            - exp_move_pct_1d: Predicted magnitude
-            - ret_fwd_1d: Actual forward return
+            - exp_move_pct_{horizon}: Predicted magnitude
+            - ret_fwd_{horizon}: Actual forward return
+        horizon: Horizon to calculate metrics for (e.g., '1d', '1w', '1m')
 
     Returns:
         dict with metrics:
@@ -194,8 +143,22 @@ def get_calibration_metrics(df):
             - rmse: Root mean squared error
             - overestimation_ratio: predicted / actual
     """
+    # Build column names for this horizon
+    pred_col = f'exp_move_pct_{horizon}'
+    actual_col = f'ret_fwd_{horizon}'
+
+    # Check if columns exist
+    if pred_col not in df.columns or actual_col not in df.columns:
+        return {
+            "predicted_mean": 0.0,
+            "actual_mean": 0.0,
+            "mae": 0.0,
+            "rmse": 0.0,
+            "overestimation_ratio": 0.0
+        }
+
     # Calculate predicted magnitude (absolute value)
-    df_valid = df[['exp_move_pct_1d', 'ret_fwd_1d']].dropna()
+    df_valid = df[[pred_col, actual_col]].dropna()
 
     if df_valid.empty:
         return {
@@ -206,8 +169,8 @@ def get_calibration_metrics(df):
             "overestimation_ratio": 0.0
         }
 
-    pred_mag = df_valid['exp_move_pct_1d'].values
-    actual_mag = np.abs(df_valid['ret_fwd_1d'].values) * 100  # Convert to %
+    pred_mag = df_valid[pred_col].values
+    actual_mag = np.abs(df_valid[actual_col].values) * 100  # Convert to %
 
     mae = np.abs(pred_mag - actual_mag).mean()
     mse = ((pred_mag - actual_mag) ** 2).mean()
