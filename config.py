@@ -16,10 +16,7 @@ CONFIDENCE_THRESHOLD = 0.70
 # --- DATA SETTINGS ---
 # Define the assets to track
 ASSETS = [
-    {"symbol": "AMZN", "name": "Amazon"},
-    {"symbol": "NVDA", "name": "NVIDIA"},
     {"symbol": "META", "name": "Meta Platforms"},
-    {"symbol": "TSLA", "name": "Tesla"},
 ]
 
 # GDELT Settings
@@ -34,14 +31,14 @@ HORIZONS = {
 
 # --- CENTRALIZED DATE SETTINGS ---
 # The date the news analysis starts.
-DATA_START_DATE = date(2025, 9, 1)
+DATA_START_DATE = date(2025, 6, 1)
 
 # The last date the LLM will analyze news for (the end of your prediction period).
-NEWS_PREDICTION_END_DATE = date(2025, 9, 15) 
+NEWS_PREDICTION_END_DATE = date(2025, 9, 30) 
 
 # The date price data must extend to, required to evaluate the final 1m prediction.
 # (NEWS_PREDICTION_END_DATE + ~21 trading days)
-PRICE_COLLECTION_END_DATE = date(2025, 10, 17)
+PRICE_COLLECTION_END_DATE = date(2025, 10, 30)
 
 # --- DIRECTORIES ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
