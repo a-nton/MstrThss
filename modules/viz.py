@@ -3,7 +3,7 @@ import numpy as np
 import os
 from scipy import stats
 from bokeh.plotting import figure, save, output_file
-from bokeh.models import ColumnDataSource, HoverTool, Div, TabPanel, Tabs
+from bokeh.models import ColumnDataSource, HoverTool, Div, TabPanel, Tabs, Button, CustomJS
 from bokeh.layouts import column, row
 from bokeh.palettes import Category10_10
 from config import HORIZONS
@@ -118,11 +118,42 @@ def calculate_calibration_thresholds(df_h, prob_col):
             n_correct = (subset["status"] == "Correct").sum()
             accuracy = (n_correct / n * 100)
 
+            # Binomial test: Is accuracy significantly different from 50% (random)?
+            # H0: true accuracy = 0.5 (random guessing)
+            # H1: true accuracy ≠ 0.5 (better or worse than random)
+            from scipy.stats import binomtest
+
+            # Perform two-sided binomial test
+            if n >= 5:  # Need at least 5 samples for meaningful test
+                binom_result = binomtest(n_correct, n, 0.5, alternative='two-sided')
+                p_value = binom_result.pvalue
+
+                # Determine significance level
+                if p_value < 0.001:
+                    sig_symbol = "***"
+                    sig_label = "p<0.001"
+                elif p_value < 0.01:
+                    sig_symbol = "**"
+                    sig_label = "p<0.01"
+                elif p_value < 0.05:
+                    sig_symbol = "*"
+                    sig_label = "p<0.05"
+                else:
+                    sig_symbol = ""
+                    sig_label = "n.s."
+            else:
+                p_value = 1.0
+                sig_symbol = ""
+                sig_label = "n/a"
+
             calibration_data.append({
                 "threshold": threshold,
                 "threshold_label": f"≥{threshold*100:.0f}%",
                 "actual_accuracy": accuracy,
-                "n": n
+                "n": n,
+                "p_value": p_value,
+                "sig_symbol": sig_symbol,
+                "sig_label": sig_label
             })
 
     return calibration_data
@@ -377,6 +408,10 @@ def generate_bokeh_dashboard(df, output_folder):
             )
 
             # Prepare data source
+            # Calculate confidence (distance from 50%) for interactive highlighting
+            confidence_values = df_h[prob_col].apply(lambda p: max(p, 1-p)).values
+            n_points = len(df_h)
+
             data_dict = dict(
                 date=df_h["date"].values,
                 act=df_h["actual_return_pct"].values,
@@ -386,7 +421,11 @@ def generate_bokeh_dashboard(df, output_folder):
                 color=df_h["color"].values,
                 headlines=df_h["headlines_formatted"].values,
                 justification=df_h["justification_display"].values,
-                prob_up=df_h[prob_col].values
+                prob_up=df_h[prob_col].values,
+                confidence=confidence_values,
+                # Add size and alpha columns for interactive highlighting
+                ts_size=[10] * n_points,  # Default size for time series diamonds
+                ts_alpha=[1.0] * n_points  # Default alpha
             )
             
             # Add Agent columns if they exist
@@ -413,7 +452,9 @@ def generate_bokeh_dashboard(df, output_folder):
 
             # Predicted returns line + diamonds (colored by correct/wrong)
             p.line('date', 'pred', source=source, color=ticker_color, line_dash="dashed", alpha=0.5, legend_label="Predicted")
-            p.scatter('date', 'pred', source=source, marker="diamond", size=10, fill_color='color', line_color=ticker_color)
+            ts_renderer = p.scatter('date', 'pred', source=source, marker="diamond", size='ts_size',
+                                   fill_alpha='ts_alpha', line_alpha='ts_alpha',
+                                   fill_color='color', line_color=ticker_color)
 
             # Tooltip with viewport constraints
             hover = HoverTool(
@@ -442,17 +483,65 @@ def generate_bokeh_dashboard(df, output_folder):
                 background_fill_color="#fafafa"
             )
 
-            # Scatter plot data
+            # Scatter plot data (enhanced with tooltip fields)
             whale_source = ColumnDataSource(data=dict(
                 pred_abs=pred_abs,
                 actual_abs=actual_abs,
                 color=df_h["color"].values,
-                date=df_h["date"].values
+                date=df_h["date"].values,
+                ticker=[ticker] * len(df_h),
+                status=df_h["status"].values,
+                confidence=confidence_values,  # Use same confidence calculation as time series
+                pred_return_pct=df_h["pred_return_pct"].values,
+                actual_return_pct=df_h["actual_return_pct"].values,
+                headlines=df_h["headlines_formatted"].values,
+                justification=df_h["justification_display"].values,
+                # Add size and alpha columns for interactive highlighting
+                whale_size=[8] * n_points,  # Default size for whale plot
+                whale_alpha=[0.6] * n_points  # Default alpha
             ))
 
-            # Add scatter points
-            whale_plot.scatter('pred_abs', 'actual_abs', source=whale_source,
-                             size=8, fill_color='color', line_color='color', alpha=0.6)
+            # Add scatter points (store renderer for interactive highlighting)
+            whale_renderer = whale_plot.scatter('pred_abs', 'actual_abs', source=whale_source,
+                             size='whale_size', fill_alpha='whale_alpha', line_alpha='whale_alpha',
+                             fill_color='color', line_color='color')
+
+            # Add tooltip for whale plot
+            magnitude_tooltip = """
+                <div style="width: 900px; max-width: 95vw; padding: 10px; word-wrap: break-word;">
+                    <div style="font-weight: bold; font-size: 14px; margin-bottom: 8px;">
+                        @ticker - @date{%F} - Magnitude Analysis
+                    </div>
+                    <div style="margin-bottom: 5px;">
+                        <b>Predicted Magnitude:</b> @pred_abs{0.00}% | <b>Actual Magnitude:</b> @actual_abs{0.00}%
+                    </div>
+                    <div style="margin-bottom: 5px;">
+                        <b>Direction:</b> Predicted @pred_return_pct{+0.00}% → Actual @actual_return_pct{+0.00}%
+                    </div>
+                    <div style="margin-bottom: 5px;">
+                        <b>Directional Status:</b> @status | <b>Confidence:</b> @confidence{0.0%}
+                    </div>
+                    <hr style="margin: 8px 0;">
+                    <div style="margin-bottom: 8px;">
+                        <b>Headlines:</b>
+                        <div style="font-size: 11px; color: #555;">@headlines{safe}</div>
+                    </div>
+                    <hr style="margin: 8px 0;">
+                    <div>
+                        <b>Analysis:</b>
+                        <div style="font-size: 11px; color: #333; font-style: italic;">@justification</div>
+                    </div>
+                </div>
+            """
+
+            whale_hover = HoverTool(
+                tooltips=magnitude_tooltip,
+                formatters={"@date": "datetime"},
+                mode='mouse',
+                attachment='horizontal',
+                show_arrow=False
+            )
+            whale_plot.add_tools(whale_hover)
 
             # Add 45-degree diagonal line (perfect predictions)
             max_val = max(pred_abs.max(), actual_abs.max()) * 1.1
@@ -460,13 +549,16 @@ def generate_bokeh_dashboard(df, output_folder):
                           line_width=2, line_dash="dashed", color="gray",
                           legend_label="Perfect Calibration", alpha=0.5)
 
-            # Calculate correlation
+            # Calculate initial correlation
             if len(pred_abs) > 1:
                 correlation = np.corrcoef(pred_abs, actual_abs)[0, 1]
-                whale_plot.add_layout(
-                    Div(text=f"<div style='font-size: 11px; color: #666;'>Correlation: {correlation:.3f}</div>"),
-                    'above'
-                )
+                correlation_text = f"<div style='font-size: 11px; color: #666;'>Correlation: {correlation:.3f} (all points)</div>"
+            else:
+                correlation_text = "<div style='font-size: 11px; color: #666;'>Correlation: N/A</div>"
+
+            # Create dynamic correlation div that can be updated
+            correlation_div = Div(text=correlation_text, width=700, height=20)
+            whale_plot.add_layout(correlation_div, 'above')
 
             whale_plot.legend.location = "top_left"
             whale_plot.legend.click_policy = "hide"
@@ -526,11 +618,19 @@ def generate_bokeh_dashboard(df, output_folder):
                     else:
                         accuracy_color = "#d62728"  # Red
 
+                    sig_symbol = d.get("sig_symbol", "")
+                    sig_label = d.get("sig_label", "")
+
+                    # Add title attribute for significance explanation
+                    sig_title = f"title='{sig_label}'" if sig_label else ""
+
                     table_rows += f"""
                     <tr>
                         <td style="padding: 3px 8px;">{threshold_label}</td>
                         <td style="padding: 3px 8px; text-align: center;">{n}</td>
-                        <td style="padding: 3px 8px; text-align: center; color: {accuracy_color}; font-weight: bold;">{actual:.1f}%</td>
+                        <td style="padding: 3px 8px; text-align: center; color: {accuracy_color}; font-weight: bold;" {sig_title}>
+                            {actual:.1f}% {sig_symbol}
+                        </td>
                     </tr>
                     """
 
@@ -554,14 +654,173 @@ def generate_bokeh_dashboard(df, output_folder):
                     <div style="font-size: 9px; color: #666; margin-top: 5px; font-style: italic;">
                         Shows: When model is ≥X% confident, how often is it correct?
                     </div>
+                    <div style="font-size: 8px; color: #666; margin-top: 3px;">
+                        Significance: *** p&lt;0.001, ** p&lt;0.01, * p&lt;0.05 (two-sided binomial test vs. 50% baseline)
+                    </div>
                 </div>
                 """
 
                 calibration_div = Div(text=calibration_html, width=700)
 
+                # --- INTERACTIVE CONFIDENCE HIGHLIGHTING BUTTONS ---
+                # Create buttons for each threshold that highlight corresponding predictions
+                highlight_buttons = []
+
+                for d in calibration_data:
+                    threshold = d["threshold"]
+                    threshold_label = d["threshold_label"]
+
+                    # Create button for this threshold
+                    btn = Button(label=f"Highlight {threshold_label}", width=120, button_type="primary", height=25)
+
+                    # Create CustomJS callback to highlight points
+                    callback = CustomJS(args=dict(
+                        ts_source=source,
+                        whale_source=whale_source,
+                        correlation_div=correlation_div,
+                        threshold=threshold,
+                        threshold_pct=int(threshold*100)
+                    ), code="""
+                        // Get confidence data from both sources
+                        const ts_confidence = ts_source.data['confidence'];
+                        const whale_confidence = whale_source.data['confidence'];
+
+                        // Update size and alpha arrays in the data sources
+                        const ts_size = ts_source.data['ts_size'];
+                        const ts_alpha = ts_source.data['ts_alpha'];
+                        const whale_size = whale_source.data['whale_size'];
+                        const whale_alpha = whale_source.data['whale_alpha'];
+
+                        // Collect highlighted points for correlation calculation
+                        const pred_abs_highlighted = [];
+                        const actual_abs_highlighted = [];
+
+                        // Highlight points that meet the threshold
+                        for (let i = 0; i < ts_confidence.length; i++) {
+                            if (ts_confidence[i] >= threshold) {
+                                ts_size[i] = 14;  // Larger
+                                ts_alpha[i] = 1.0;  // Fully opaque
+                            } else {
+                                ts_size[i] = 6;   // Smaller
+                                ts_alpha[i] = 0.2;  // Very transparent
+                            }
+                        }
+
+                        for (let i = 0; i < whale_confidence.length; i++) {
+                            if (whale_confidence[i] >= threshold) {
+                                whale_size[i] = 12;  // Larger
+                                whale_alpha[i] = 1.0;  // Fully opaque
+
+                                // Collect for correlation
+                                pred_abs_highlighted.push(whale_source.data['pred_abs'][i]);
+                                actual_abs_highlighted.push(whale_source.data['actual_abs'][i]);
+                            } else {
+                                whale_size[i] = 4;   // Smaller
+                                whale_alpha[i] = 0.2;  // Very transparent
+                            }
+                        }
+
+                        // Calculate correlation for highlighted points
+                        let corr_text = "";
+                        if (pred_abs_highlighted.length > 1) {
+                            const n = pred_abs_highlighted.length;
+
+                            // Calculate means
+                            let sum_x = 0, sum_y = 0;
+                            for (let i = 0; i < n; i++) {
+                                sum_x += pred_abs_highlighted[i];
+                                sum_y += actual_abs_highlighted[i];
+                            }
+                            const mean_x = sum_x / n;
+                            const mean_y = sum_y / n;
+
+                            // Calculate correlation
+                            let sum_xy = 0, sum_x2 = 0, sum_y2 = 0;
+                            for (let i = 0; i < n; i++) {
+                                const dx = pred_abs_highlighted[i] - mean_x;
+                                const dy = actual_abs_highlighted[i] - mean_y;
+                                sum_xy += dx * dy;
+                                sum_x2 += dx * dx;
+                                sum_y2 += dy * dy;
+                            }
+
+                            const correlation = sum_xy / Math.sqrt(sum_x2 * sum_y2);
+                            corr_text = `<div style='font-size: 11px; color: #666;'>Correlation: ${correlation.toFixed(3)} (${n} points ≥${threshold_pct}% confidence)</div>`;
+                        } else {
+                            corr_text = `<div style='font-size: 11px; color: #666;'>Correlation: N/A (insufficient points ≥${threshold_pct}%)</div>`;
+                        }
+
+                        // Update correlation display
+                        correlation_div.text = corr_text;
+
+                        // Trigger re-render by emitting change event
+                        ts_source.change.emit();
+                        whale_source.change.emit();
+                    """)
+
+                    btn.js_on_click(callback)
+                    highlight_buttons.append(btn)
+
+                # Add "Reset" button to clear highlighting
+                reset_btn = Button(label="Reset View", width=120, button_type="default", height=25)
+                reset_callback = CustomJS(args=dict(
+                    ts_source=source,
+                    whale_source=whale_source,
+                    correlation_div=correlation_div,
+                    original_correlation_text=correlation_text
+                ), code="""
+                    // Reset to default sizes and alphas
+                    const ts_size = ts_source.data['ts_size'];
+                    const ts_alpha = ts_source.data['ts_alpha'];
+                    const whale_size = whale_source.data['whale_size'];
+                    const whale_alpha = whale_source.data['whale_alpha'];
+
+                    // Reset all points to default values
+                    for (let i = 0; i < ts_size.length; i++) {
+                        ts_size[i] = 10;   // Default size
+                        ts_alpha[i] = 1.0;  // Default alpha
+                    }
+
+                    for (let i = 0; i < whale_size.length; i++) {
+                        whale_size[i] = 8;   // Default size
+                        whale_alpha[i] = 0.6;  // Default alpha
+                    }
+
+                    // Reset correlation text to original
+                    correlation_div.text = original_correlation_text;
+
+                    // Trigger re-render
+                    ts_source.change.emit();
+                    whale_source.change.emit();
+                """)
+                reset_btn.js_on_click(reset_callback)
+
+                # Create button layout (2 columns for compact display)
+                button_grid = []
+                for i in range(0, len(highlight_buttons), 2):
+                    if i+1 < len(highlight_buttons):
+                        button_grid.append(row(highlight_buttons[i], highlight_buttons[i+1]))
+                    else:
+                        button_grid.append(row(highlight_buttons[i]))
+
+                # Add reset button at the bottom
+                button_grid.append(row(reset_btn))
+
+                # Create info text
+                button_info = Div(text="""
+                    <div style="font-size: 10px; color: #666; margin-top: 5px; font-style: italic;">
+                        Click a button to highlight predictions with that confidence level in both plots below.
+                    </div>
+                """, width=260)
+
+                buttons_column = column([button_info] + button_grid)
+
+                # Combine calibration table and buttons
+                calibration_section = row(calibration_div, buttons_column)
+
                 # Create grid layout
-                # Row 1: Metrics stats and Calibration table side-by-side
-                row_top = row(metrics_div, calibration_div)
+                # Row 1: Metrics stats and Calibration section (table + buttons)
+                row_top = row(metrics_div, calibration_section)
 
                 # Row 2: Main time series plot and Whale plot
                 row_plots = row(p, whale_plot)
