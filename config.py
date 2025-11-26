@@ -16,7 +16,13 @@ CONFIDENCE_THRESHOLD = 0.70
 # --- DATA SETTINGS ---
 # Define the assets to track
 ASSETS = [
-    {"symbol": "GOOGL", "name": "Alphabet (Google)"},
+    {"symbol": "AAPL", "name": "Apple"},
+    {"symbol": "MSFT", "name": "Microsoft"},
+    {"symbol": "GOOGL", "name": "Google"},
+    {"symbol": "AMZN", "name": "Amazon"},
+    {"symbol": "NVDA", "name": "NVIDIA"},
+    {"symbol": "META", "name": "Meta"},
+    {"symbol": "TSLA", "name": "Tesla"},
 ]
 
 # GDELT Settings
@@ -31,7 +37,7 @@ HORIZONS = {
 
 # --- CENTRALIZED DATE SETTINGS ---
 # The date the news analysis starts.
-DATA_START_DATE = date(2025, 6, 1)
+DATA_START_DATE = date(2025, 7, 1)
 
 # The last date the LLM will analyze news for (the end of your prediction period).
 NEWS_PREDICTION_END_DATE = date(2025, 9, 30) 

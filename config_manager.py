@@ -12,20 +12,20 @@ import os
 import re
 from datetime import date, datetime
 
-# S&P 500 stocks (subset of major companies for usability)
-# Format: (Ticker, Company Name)
+# S&P 500 stocks (Optimized for GDELT/News Search)
+# Format: (Ticker, Search_Term)
 SP500_STOCKS = [
     ("AAPL", "Apple"),
     ("MSFT", "Microsoft"),
-    ("GOOGL", "Alphabet (Google)"),
+    ("GOOGL", "Google"),                # Changed from Alphabet (Google)
     ("AMZN", "Amazon"),
     ("NVDA", "NVIDIA"),
-    ("META", "Meta Platforms"),
+    ("META", "Meta"),         # "Meta" is too broad, keep full name?
     ("TSLA", "Tesla"),
     ("BRK.B", "Berkshire Hathaway"),
-    ("UNH", "UnitedHealth Group"),
+    ("UNH", "UnitedHealth"),            # Shortened for better hits
     ("JNJ", "Johnson & Johnson"),
-    ("JPM", "JPMorgan Chase"),
+    ("JPM", "JPMorgan"),                # Removed "Chase" for broader matching
     ("V", "Visa"),
     ("PG", "Procter & Gamble"),
     ("XOM", "Exxon Mobil"),
@@ -42,7 +42,7 @@ SP500_STOCKS = [
     ("WMT", "Walmart"),
     ("MCD", "McDonald's"),
     ("CSCO", "Cisco"),
-    ("TMO", "Thermo Fisher Scientific"),
+    ("TMO", "Thermo Fisher"),           # Shortened
     ("ABT", "Abbott Laboratories"),
     ("ACN", "Accenture"),
     ("DIS", "Disney"),
@@ -52,7 +52,7 @@ SP500_STOCKS = [
     ("CRM", "Salesforce"),
     ("VZ", "Verizon"),
     ("CMCSA", "Comcast"),
-    ("AMD", "Advanced Micro Devices"),
+    ("AMD", "AMD"),                     # "Advanced Micro Devices" is rare in headlines
     ("INTC", "Intel"),
     ("PFE", "Pfizer"),
     ("DHR", "Danaher"),
@@ -63,7 +63,7 @@ SP500_STOCKS = [
     ("NEE", "NextEra Energy"),
     ("COP", "ConocoPhillips"),
     ("BMY", "Bristol Myers Squibb"),
-    ("RTX", "Raytheon Technologies"),
+    ("RTX", "Raytheon"),
     ("WFC", "Wells Fargo"),
 ]
 

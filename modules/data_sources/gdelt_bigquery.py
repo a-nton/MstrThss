@@ -45,13 +45,48 @@ def check_bigquery_available():
         return False, f"Failed to create BigQuery client: {str(e)}"
 
 
+def clean_company_name(name):
+    """
+    Extracts meaningful search phrases from a company name.
+    1. Splits by parentheses (aliases).
+    2. Removes corporate suffixes (Inc, Corp, Ltd, etc).
+    3. Preserves multi-word phrases (e.g., 'General Motors').
+    """
+    # 1. Split by parens to handle "Alphabet (Google)" -> ["Alphabet", "Google"]
+    raw_parts = re.split(r'[\(\)]', name)
+    
+    # 2. Define corporate stopwords to strip (case insensitive)
+    # Note: We use \b to ensure whole word matching
+    stopwords = [
+        r"\bInc\.?\b", r"\bCorp\.?\b", r"\bCorporation\b", r"\bLtd\.?\b", 
+        r"\bLimited\b", r"\bCo\.?\b", r"\bCompany\b", r"\bPLC\b", 
+        r"\bGroup\b", r"\bHoldings\b", r"\bSA\b", r"\bAG\b", r"\bNV\b"
+    ]
+    
+    cleaned_phrases = []
+    
+    for part in raw_parts:
+        clean = part.strip()
+        if not clean:
+            continue
+            
+        # Remove stopwords
+        for stop in stopwords:
+            clean = re.sub(stop, "", clean, flags=re.IGNORECASE)
+            
+        # Clean up extra spaces left behind
+        clean = " ".join(clean.split())
+        
+        # Only keep if significant length (> 2 chars)
+        if len(clean) > 2:
+            cleaned_phrases.append(clean)
+            
+    return list(set(cleaned_phrases))
+
+
 def fetch_news(ticker, company_name, start_date=None, end_date=None, max_per_day=1000):
     """
     Fetch news from GDELT BigQuery using "Smart Regex" matching.
-    
-    Cost Note: Making the filter stricter DOES NOT increase query cost. 
-    It creates a higher quality result set, ensuring the LIMIT 1000 captures 
-    real news instead of noise.
     """
 
     # Check BigQuery availability
@@ -78,19 +113,31 @@ def fetch_news(ticker, company_name, start_date=None, end_date=None, max_per_day
 
     client = bigquery.Client()
     
-    # --- SMART REGEX PATTERNS ---
-    # (?i) = Case insensitive
-    # (?:^|[^a-z]) = Start of string OR any character that is NOT a letter
-    # This allows 'META' to match 'ORG_META_PLATFORMS' (underscore is non-letter in this regex context)
-    # But rejects 'METAL' because 'L' is a letter.
+    # --- 1. PREPARE SEARCH TERMS ---
+    # Extract phrases like ["Alphabet", "Google"] or ["General Motors"]
+    search_phrases = clean_company_name(company_name)
     
-    # Pattern for Ticker (e.g., META)
-    bq_pattern_ticker = fr'(?i)(?:^|[^a-z]){ticker.lower()}(?:$|[^a-z])'
+    # Always include Ticker
+    if ticker not in search_phrases:
+        search_phrases.append(ticker)
+        
+    print(f"   Querying GDELT BigQuery for: {search_phrases}")
     
-    # Pattern for Name (e.g., Meta)
-    bq_pattern_name = fr'(?i)(?:^|[^a-z]){company_name.lower()}(?:$|[^a-z])'
-
-    print(f"   Querying GDELT BigQuery day-by-day from {start_date} to {end_date}...")
+    # --- 2. BUILD BIGQUERY REGEX ---
+    # We want to match whole words/phrases.
+    # "General Motors" should match "General Motors" OR "General_Motors" (GDELT format)
+    # Logic: (?i)(?:^|[^a-z])(Phrase One|Phrase Two|Ticker)(?:$|[^a-z])
+    
+    regex_parts = []
+    for phrase in search_phrases:
+        # Escape regex chars, then allow spaces to match literal space OR underscore
+        # e.g. "General Motors" -> "General[_\s]Motors"
+        escaped = re.escape(phrase)
+        flexible_space = escaped.replace("\ ", r"[_\s]")
+        regex_parts.append(flexible_space)
+        
+    joined_regex = "|".join(regex_parts)
+    bq_smart_regex = fr'(?i)(?:^|[^a-z])({joined_regex})(?:$|[^a-z])'
     
     while day <= end_date:
         day_counter += 1
@@ -100,7 +147,6 @@ def fetch_news(ticker, company_name, start_date=None, end_date=None, max_per_day
         
         date_str = day.strftime('%Y-%m-%d')
         
-        # Build query with Smart Regex
         query = f"""
         SELECT
             DocumentIdentifier as url,
@@ -115,12 +161,11 @@ def fetch_news(ticker, company_name, start_date=None, end_date=None, max_per_day
             AND Extras LIKE '%<PAGE_TITLE>%'
             AND GKGRECORDID NOT LIKE '%-T%'
             
-            -- SMART SEARCH: Strict enough to reject 'Metal', loose enough for 'Meta_Platforms'
+            -- SMART SEARCH: Match any of our valid phrases in Themes, Persons, or Orgs
             AND (
-                REGEXP_CONTAINS(Themes, r'{bq_pattern_ticker}')
-                OR REGEXP_CONTAINS(Themes, r'{bq_pattern_name}')
-                OR REGEXP_CONTAINS(Persons, r'{bq_pattern_name}')
-                OR REGEXP_CONTAINS(Organizations, r'{bq_pattern_name}')
+                REGEXP_CONTAINS(Themes, r'{bq_smart_regex}')
+                OR REGEXP_CONTAINS(Persons, r'{bq_smart_regex}')
+                OR REGEXP_CONTAINS(Organizations, r'{bq_smart_regex}')
             )
             AND SourceCommonName IS NOT NULL
         LIMIT {max_per_day}
@@ -145,28 +190,21 @@ def fetch_news(ticker, company_name, start_date=None, end_date=None, max_per_day
                 # Basic cleanup: remove empty titles
                 df = df[df['title'].astype(str).str.strip() != '']
                 
-                # Redundant safety filter (Python side)
-                # Just in case the regex missed an edge case, we do a final check on the TITLE.
-                # Extract meaningful keywords from company name (handle special characters)
-
-                # Build flexible patterns for company name
-                # For "Alphabet (Google)", we want to match "Alphabet" OR "Google"
-                # For "Meta Platforms", we want to match "Meta" OR "Platforms"
-                company_keywords = re.split(r'[\s\(\)]', company_name)
-                company_keywords = [kw.strip() for kw in company_keywords if len(kw.strip()) > 2]
-
-                # Ticker pattern (word boundary)
-                strict_ticker = rf'\b{re.escape(ticker)}\b'
-
-                # Build OR pattern for all company keywords
-                # Escape special regex chars, use word boundaries
-                company_patterns = [rf'\b{re.escape(kw)}\b' for kw in company_keywords]
-
-                # Check if title contains ticker OR any company keyword
-                mask = df["title"].str.contains(strict_ticker, case=False, regex=True, na=False)
-                for pattern in company_patterns:
+                # --- 3. PYTHON-SIDE VALIDATION FILTER ---
+                # Re-verify title contains at least one of our phrases
+                # This filters out articles where the company was only mentioned in the footer/tags
+                
+                mask = pd.Series([False] * len(df), index=df.index)
+                
+                for phrase in search_phrases:
+                    # Strict word boundary check for Ticker, looser for multi-word phrases
+                    if phrase == ticker:
+                        pattern = rf'\b{re.escape(phrase)}\b'
+                    else:
+                        pattern = re.escape(phrase)
+                        
                     mask |= df["title"].str.contains(pattern, case=False, regex=True, na=False)
-
+                
                 df = df[mask]
                 
                 # Final deduplication
